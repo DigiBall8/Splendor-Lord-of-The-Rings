@@ -347,37 +347,47 @@ h1 {
     object-fit: cover;
 }
 
-/* MOBILE RESPONSIVE ADJUSTMENTS */
-@media screen and (max-width: 768px) {
+/* FORCED MOBILE RESPONSIVE OVERRIDES */
+@media screen and (max-width: 1024px) {
     body {
-        overflow: auto;
-        height: auto;
+        overflow: auto !important;
+        height: auto !important;
+        width: 100% !important;
     }
     #game-container {
-        height: auto;
-        overflow: visible;
+        height: auto !important;
+        overflow: visible !important;
     }
     #top-extra-row {
-        flex-direction: column;
-        padding-right: 12px;
+        flex-direction: column !important;
+        padding-right: 0 !important;
+        gap: 10px !important;
+    }
+    #ring-card-container, #lorien-panel, .noble-card {
+        width: 120px !important;
     }
     #main-layout {
-        grid-template-columns: 1fr;
-        overflow: visible;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: visible !important;
+    }
+    .panel {
+        overflow: visible !important;
+        height: auto !important;
     }
     .bank-token-item {
-        width: 100px;
-        height: 50px;
+        width: 90px !important;
+        height: 45px !important;
     }
     .bank-token-item img {
-        width: 120px;
-        height: 120px;
+        width: 100px !important;
+        height: 100px !important;
     }
     #market-panel .card, .draw-pile {
-        width: 120px;
+        width: 110px !important;
     }
     .card-market {
-        overflow-x: auto;
-        padding-bottom: 6px;
+        flex-wrap: wrap !important;
+        justify-content: center !important;
     }
 }
