@@ -1,20 +1,109 @@
-const numPlayers = 4;
-let activePlayerIndex = 0;
-let lorienHolderId = null;
+// ============================
+// CUSTOM POPUP MODAL SYSTEM
+// (replaces native alert/confirm/prompt)
+// ============================
+function showModal({ title = 'Notice', message = '', type = 'alert', variant = 'info', defaultValue = '', code = null, okText = 'OK', cancelText = 'Cancel', confirmText = 'Yes', denyText = 'No' } = {}) {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('custom-modal');
+        const box = document.getElementById('custom-modal-box');
+        const iconEl = document.getElementById('custom-modal-icon');
+        const titleEl = document.getElementById('custom-modal-title');
+        const msgEl = document.getElementById('custom-modal-message');
+        const inputEl = document.getElementById('custom-modal-input');
+        const codeWrap = document.getElementById('custom-modal-code-wrap');
+        const codeEl = document.getElementById('custom-modal-code');
+        const copyBtn = document.getElementById('custom-modal-copy-btn');
+        const buttonsEl = document.getElementById('custom-modal-buttons');
 
-const players = [];
-for (let i = 1; i <= numPlayers; i++) {
-    players.push({
-        id: i,
-        victoryPoints: 0,
-        leaves: 0,
-        hasReceivedOnyxToken: false,
-        gems: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 0, onyx: 0, joker: 0 },
-        bonuses: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 0 },
-        purchasedCards: [],
-        reservedCards: []
+        box.className = 'menu-box modal-box' + (variant === 'warning' ? ' modal-warning' : variant === 'success' ? ' modal-success' : '');
+        iconEl.textContent = variant === 'warning' ? '⚠️' : variant === 'success' ? '✅' : 'ℹ️';
+        titleEl.textContent = title;
+        msgEl.textContent = message;
+        buttonsEl.innerHTML = '';
+        inputEl.style.display = 'none';
+        inputEl.value = '';
+        codeWrap.style.display = 'none';
+
+        function close(result) {
+            overlay.style.display = 'none';
+            document.removeEventListener('keydown', keyHandler, true);
+            resolve(result);
+        }
+
+        function keyHandler(e) {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                close(type === 'prompt' ? null : false);
+            } else if (e.key === 'Enter' && type !== 'prompt') {
+                e.stopPropagation();
+                close(true);
+            }
+        }
+
+        function addButton(text, onClick, danger) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = text;
+            if (danger) btn.style.backgroundColor = '#c0392b';
+            btn.onclick = onClick;
+            buttonsEl.appendChild(btn);
+            return btn;
+        }
+
+        if (type === 'confirm') {
+            addButton(confirmText, () => close(true));
+            addButton(denyText, () => close(false), true);
+        } else if (type === 'prompt') {
+            inputEl.style.display = 'block';
+            inputEl.value = defaultValue || '';
+            inputEl.onkeydown = (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); close(inputEl.value.trim()); }
+            };
+            addButton(okText, () => close(inputEl.value.trim()));
+            addButton(cancelText, () => close(null));
+        } else if (type === 'roomcode') {
+            codeWrap.style.display = 'flex';
+            codeEl.textContent = code;
+            copyBtn.textContent = 'Copy Code';
+            copyBtn.onclick = () => {
+                const done = () => {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = 'Copy Code'; }, 1500);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(code).then(done).catch(done);
+                } else {
+                    done();
+                }
+            };
+            addButton("Let's Play", () => close(true));
+        } else {
+            addButton(okText, () => close(true));
+        }
+
+        overlay.style.display = 'flex';
+        document.addEventListener('keydown', keyHandler, true);
+        if (type === 'prompt') setTimeout(() => inputEl.focus(), 50);
     });
 }
+
+// Fire-and-forget notice popup (drop-in replacement for alert())
+function notify(message, title = 'Notice', variant = 'info') {
+    showModal({ title, message, type: 'alert', variant });
+}
+
+let numPlayers = 4;
+let activePlayerIndex = 0;
+let lorienHolderId = null;
+let players = [];
+let localPlayerName = "Player 1";
+
+// --- MULTIPLAYER NETWORK STATE ---
+let peer = null;
+let conn = null;
+let isHost = false;
+let isMultiplayerMode = false;
+let hostingForMultiplayer = false;
 
 const CARD_DATABASE = {
     1: {
@@ -65,7 +154,7 @@ const CARD_DATABASE = {
         3: { points: 1, gem: 'ruby', leaves: true, cost: { emerald: 0, diamond: 3, sapphire: 0, ruby: 2, gold: 2 } },
         4: { points: 1, gem: 'ruby', leaves: true, cost: { emerald: 2, diamond: 3, sapphire: 0, ruby: 3, gold: 0 } },
         5: { points: 1, gem: 'sapphire', leaves: true, cost: { emerald: 2, diamond: 0, sapphire: 2, ruby: 0, gold: 3 } },
-        6: { points: 3, gem: 'sapphire', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 6, ruby: 0, gold: 0 } },
+        6: { points: 3, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 6, ruby: 0, gold: 0 } },
         7: { points: 2, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 5, ruby: 0, gold: 0 } },
         8: { points: 1, gem: 'sapphire', leaves: true, cost: { emerald: 0, diamond: 2, sapphire: 3, ruby: 0, gold: 3 } },
         9: { points: 2, gem: 'sapphire', leaves: false, cost: { emerald: 1, diamond: 2, sapphire: 0, ruby: 0, gold: 4 } },
@@ -116,36 +205,18 @@ const CARD_DATABASE = {
 };
 
 function getCardByTierAndNumber(tier, randNum) {
-    if (CARD_DATABASE[tier] && CARD_DATABASE[tier][randNum]) {
-        const data = CARD_DATABASE[tier][randNum];
-        let leafCount = typeof data.leaves === 'number' ? data.leaves : (data.leaves ? 1 : 0);
-        return {
-            id: tier * 1000 + randNum,
-            points: data.points,
-            gem: data.gem,
-            leaves: leafCount,
-            cost: data.cost,
-            image: `Level ${tier} Cards/${randNum}.jpg`
-        };
+    if (!CARD_DATABASE[tier] || !CARD_DATABASE[tier][randNum]) {
+        console.error(`No card data for tier ${tier}, number ${randNum}.`);
+        return null;
     }
-
-    const gems = ['emerald', 'diamond', 'sapphire', 'ruby', 'gold'];
-    const gem = gems[Math.floor(Math.random() * gems.length)];
-    let points = tier === 1 ? (Math.random() < 0.7 ? 0 : 1) : (tier === 2 ? Math.floor(Math.random() * 2) + 1 : Math.floor(Math.random() * 3) + 3);
-    
-    let cost = { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 0 };
-    let totalCost = tier === 1 ? 3 : (tier === 2 ? 5 : 7);
-    for (let i = 0; i < totalCost; i++) {
-        let rGem = gems[Math.floor(Math.random() * gems.length)];
-        cost[rGem] = (cost[rGem] || 0) + 1;
-    }
-
+    const data = CARD_DATABASE[tier][randNum];
+    let leafCount = typeof data.leaves === 'number' ? data.leaves : (data.leaves ? 1 : 0);
     return {
         id: tier * 1000 + randNum,
-        points: points,
-        gem: gem,
-        leaves: Math.random() > 0.8 ? 2 : (Math.random() > 0.6 ? 1 : 0),
-        cost: cost,
+        points: data.points,
+        gem: data.gem,
+        leaves: leafCount,
+        cost: data.cost,
         image: `Level ${tier} Cards/${randNum}.jpg`
     };
 }
@@ -153,11 +224,9 @@ function getCardByTierAndNumber(tier, randNum) {
 function createDeck(tier) {
     let deck = [];
     let maxCards = tier === 1 ? 40 : (tier === 2 ? 30 : 20);
-    
     for (let i = 1; i <= maxCards; i++) {
         deck.push(getCardByTierAndNumber(tier, i));
     }
-    
     for (let i = deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -168,32 +237,28 @@ function createDeck(tier) {
 const gameState = {
     turnNumber: 1,
     actionTakenThisTurn: false,
-    turnGemsPicked: [], 
+    turnGemsPicked: [],
+    ringActive: false,
+    ringActivatorId: null,
+    gameEnded: false, 
     bank: { emerald: 4, diamond: 4, sapphire: 4, ruby: 4, gold: 4 },
-    
-    decks: {
-        1: createDeck(1),
-        2: createDeck(2),
-        3: createDeck(3)
-    },
-
+    decks: { 1: createDeck(1), 2: createDeck(2), 3: createDeck(3) },
     marketTier1: [],
     marketTier2: [],
     marketTier3: [],
-
     destinationsPool: [
-        { id: 901, points: 3, requirements: { emerald: 4, diamond: 4, sapphire: 0, ruby: 0, gold: 0 }, image: 'Destinations/1.jpg' },
-        { id: 902, points: 3, requirements: { emerald: 0, diamond: 0, sapphire: 4, ruby: 4, gold: 0 }, image: 'Destinations/2.jpg' },
-        { id: 903, points: 3, requirements: { emerald: 3, diamond: 0, sapphire: 3, ruby: 0, gold: 3 }, image: 'Destinations/3.jpg' },
-        { id: 904, points: 3, requirements: { emerald: 0, diamond: 3, sapphire: 0, ruby: 3, gold: 3 }, image: 'Destinations/4.jpg' },
-        { id: 905, points: 3, requirements: { emerald: 3, diamond: 3, sapphire: 0, ruby: 0, gold: 3 }, image: 'Destinations/5.jpg' },
-        { id: 906, points: 3, requirements: { emerald: 4, diamond: 0, sapphire: 4, ruby: 0, gold: 0 }, image: 'Destinations/6.jpg' },
-        { id: 907, points: 3, requirements: { emerald: 0, diamond: 4, sapphire: 0, ruby: 0, gold: 4 }, image: 'Destinations/7.jpg' },
-        { id: 908, points: 3, requirements: { emerald: 0, diamond: 0, sapphire: 0, ruby: 4, gold: 4 }, image: 'Destinations/8.jpg' },
-        { id: 909, points: 3, requirements: { emerald: 3, diamond: 3, sapphire: 3, ruby: 0, gold: 0 }, image: 'Destinations/9.jpg' },
-        { id: 910, points: 3, requirements: { emerald: 0, diamond: 0, sapphire: 3, ruby: 3, gold: 3 }, image: 'Destinations/10.jpg' },
-        { id: 911, points: 3, requirements: { emerald: 2, diamond: 2, sapphire: 2, ruby: 2, gold: 0 }, image: 'Destinations/11.jpg' },
-        { id: 912, points: 3, requirements: { emerald: 0, diamond: 2, sapphire: 2, ruby: 2, gold: 2 }, image: 'Destinations/12.jpg' }
+        { id: 901, points: 3, requirements: { emerald: 0, diamond: 3, sapphire: 0, ruby: 3, gold: 3 }, image: 'Destinations/1.jpg' },
+        { id: 902, points: 3, requirements: { emerald: 0, diamond: 3, sapphire: 3, ruby: 3, gold: 0 }, image: 'Destinations/2.jpg' },
+        { id: 903, points: 3, requirements: { emerald: 3, diamond: 0, sapphire: 0, ruby: 3, gold: 3 }, image: 'Destinations/3.jpg' },
+        { id: 904, points: 3, requirements: { emerald: 3, diamond: 0, sapphire: 3, ruby: 0, gold: 3 }, image: 'Destinations/4.jpg' },
+        { id: 905, points: 3, requirements: { emerald: 0, diamond: 4, sapphire: 0, ruby: 4, gold: 0 }, image: 'Destinations/5.jpg' },
+        { id: 906, points: 3, requirements: { emerald: 0, diamond: 4, sapphire: 0, ruby: 0, gold: 4 }, image: 'Destinations/6.jpg' },
+        { id: 907, points: 3, requirements: { emerald: 0, diamond: 0, sapphire: 4, ruby: 4, gold: 0 }, image: 'Destinations/7.jpg' },
+        { id: 908, points: 3, requirements: { emerald: 0, diamond: 0, sapphire: 4, ruby: 0, gold: 4 }, image: 'Destinations/8.jpg' },
+        { id: 909, points: 3, requirements: { emerald: 4, diamond: 0, sapphire: 4, ruby: 0, gold: 0 }, image: 'Destinations/9.jpg' },
+        { id: 910, points: 3, requirements: { emerald: 0, diamond: 4, sapphire: 4, ruby: 0, gold: 0 }, image: 'Destinations/10.jpg' },
+        { id: 911, points: 3, requirements: { emerald: 4, diamond: 0, sapphire: 0, ruby: 0, gold: 4 }, image: 'Destinations/11.jpg' },
+        { id: 912, points: 3, requirements: { emerald: 4, diamond: 0, sapphire: 0, ruby: 4, gold: 0 }, image: 'Destinations/12.jpg' }
     ],
     activeDestinations: []
 };
@@ -204,18 +269,39 @@ gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gam
 
 function drawCardFromDeck(tierNumber) {
     const deck = gameState.decks[tierNumber];
-    if (!deck || deck.length === 0) {
-        return null;
-    }
+    if (!deck || deck.length === 0) return null;
     return deck.pop();
 }
 
-function initGame() {
+function initGame(selectedPlayerCount, customNames = []) {
+    numPlayers = selectedPlayerCount;
+    activePlayerIndex = 0;
+    lorienHolderId = null;
+    players = [];
+    gameState.ringActive = false;
+    gameState.ringActivatorId = null;
+    gameState.gameEnded = false;
+
+    for (let i = 1; i <= numPlayers; i++) {
+        let defaultName = `Player ${i}`;
+        let pName = customNames[i - 1] || (i === 1 ? localPlayerName : defaultName);
+        players.push({
+            id: i,
+            playerName: pName,
+            victoryPoints: 0,
+            leaves: 0,
+            hasReceivedOnyxToken: false,
+            gems: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 0, onyx: 0, joker: 0 },
+            bonuses: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 0 },
+            purchasedCards: [],
+            reservedCards: []
+        });
+    }
+
     gameState.activeDestinations = [...gameState.destinationsPool].sort(() => Math.random() - 0.5).slice(0, 3);
     updateUI();
     renderAllMarkets();
     renderNobles();
-    updateLorienDisplay();
 }
 
 function getCurrentPlayer() {
@@ -243,7 +329,6 @@ function renderMarket(elementId, marketArray, tierNumber) {
         } else {
             cardDiv.style.visibility = 'hidden';
         }
-        
         marketContainer.appendChild(cardDiv);
     });
 }
@@ -251,15 +336,17 @@ function renderMarket(elementId, marketArray, tierNumber) {
 function renderNobles() {
     const container = document.getElementById('nobles-container');
     container.innerHTML = '';
-
+    // Claimed slots are kept as empty placeholders (rather than removed)
+    // so the remaining destination cards - and everything else in the
+    // row - don't shift position.
     gameState.activeDestinations.forEach(noble => {
         const nobleDiv = document.createElement('div');
         nobleDiv.className = 'noble-card';
-        nobleDiv.innerHTML = `
-            <div class="noble-img-container">
-                <img src="${noble.image}" alt="Destination Card" class="destination-img">
-            </div>
-        `;
+        if (noble) {
+            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img">`;
+        } else {
+            nobleDiv.style.visibility = 'hidden';
+        }
         container.appendChild(nobleDiv);
     });
 }
@@ -278,7 +365,6 @@ function renderReservedCards() {
         const cardDiv = document.createElement('div');
         cardDiv.className = 'card';
         cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img">`;
-
         cardDiv.onclick = () => buyReservedCard(index);
         container.appendChild(cardDiv);
     });
@@ -293,22 +379,76 @@ function renderAllPlayersStatus() {
         const isCurrent = idx === activePlayerIndex;
         const playerDiv = document.createElement('div');
         playerDiv.style.fontSize = '10px';
-        playerDiv.style.padding = '3px 4px';
-        playerDiv.style.marginBottom = '2px';
+        playerDiv.style.padding = '4px 6px';
+        playerDiv.style.marginBottom = '3px';
         playerDiv.style.borderRadius = '3px';
         playerDiv.style.background = isCurrent ? 'rgba(26, 188, 156, 0.2)' : 'rgba(0,0,0,0.15)';
         playerDiv.style.border = isCurrent ? '1px solid #1abc9c' : '1px solid transparent';
 
         let totalTokens = Object.values(p.gems).reduce((a, b) => a + b, 0);
+
+        const makeTokenSpan = (file, count, gemKey) => `
+            <span class="clickable-token" data-gem="${gemKey}" style="display:inline-flex; align-items:center; margin-right:4px; ${isCurrent ? 'cursor:pointer; text-decoration:underline;' : ''}" title="${isCurrent ? 'Click to return 1 ' + gemKey : ''}">
+                <img src="tokens/${file}.png" style="width:12px; height:12px; vertical-align:middle; margin-right:1px; pointer-events:none;" />${count}
+            </span>`;
         
+        let tokensHtml = `
+            ${makeTokenSpan('emerald', p.gems.emerald, 'emerald')}
+            ${makeTokenSpan('diamond', p.gems.diamond, 'diamond')}
+            ${makeTokenSpan('sapphire', p.gems.sapphire, 'sapphire')}
+            ${makeTokenSpan('ruby', p.gems.ruby, 'ruby')}
+            ${makeTokenSpan('gold', p.gems.gold, 'gold')}
+            ${makeTokenSpan('onyx', p.gems.onyx, 'onyx')}
+            ${makeTokenSpan('joker', p.gems.joker, 'joker')}
+        `;
+
+        const tokenIconStatic = (file, count) => `<span style="display:inline-flex; align-items:center; margin-right:4px;"><img src="tokens/${file}.png" style="width:12px; height:12px; vertical-align:middle; margin-right:1px;" />${count}</span>`;
+        let bonusesHtml = `
+            ${tokenIconStatic('emerald', p.bonuses.emerald)}
+            ${tokenIconStatic('diamond', p.bonuses.diamond)}
+            ${tokenIconStatic('sapphire', p.bonuses.sapphire)}
+            ${tokenIconStatic('ruby', p.bonuses.ruby)}
+            ${tokenIconStatic('gold', p.bonuses.gold)}
+        `;
+
+        let leafHtml = `<span>${p.leaves}</span>`;
+
         playerDiv.innerHTML = `
-            <div style="font-weight: bold; color: ${isCurrent ? '#1abc9c' : '#ecf0f1'};">
-                Player ${p.id} ${isCurrent ? '⭐ (Active)' : ''} — VP: ${p.victoryPoints} | Tokens: ${totalTokens}/10
+            <div style="font-weight: bold; color: ${isCurrent ? '#1abc9c' : '#ecf0f1'}; margin-bottom: 2px;">
+                ${escapeHtml(p.playerName)} ${isCurrent ? '⭐ (Active)' : ''} — VP: ${p.victoryPoints} | Tokens: ${totalTokens}/10
             </div>
-            <div style="color: #bdc3c7; margin-top: 1px;">
-                Em:${p.gems.emerald} Di:${p.gems.diamond} Sa:${p.gems.sapphire} Ru:${p.gems.ruby} Go:${p.gems.gold} Onyx:${p.gems.onyx} Jok:${p.gems.joker}
+            <div style="color: #bdc3c7; margin-top: 1px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
+                <span>Tokens:</span> ${tokensHtml}
+            </div>
+            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
+                <span>Discounts:</span> ${bonusesHtml}
+            </div>
+            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
+                <span>Lorien Leaf:</span> ${leafHtml} ${p.id === lorienHolderId ? '<span style="color: #f1c40f; font-weight:bold;">(👑 Leaf Holder)</span>' : ''}
             </div>
         `;
+
+        // Direct click-to-return individual token logic without alert prompts
+        if (isCurrent) {
+            playerDiv.querySelectorAll('.clickable-token').forEach(tokenSpan => {
+                let color = tokenSpan.getAttribute('data-gem');
+                tokenSpan.onclick = (e) => {
+                    e.stopPropagation();
+                    let currentTotal = getTotalPlayerTokens(p);
+                    if (currentTotal <= 10) {
+                        return; // Ignore if user is under 10 limit
+                    }
+                    if (p.gems[color] > 0) {
+                        p.gems[color]--;
+                        if (gameState.bank[color] !== undefined) {
+                            gameState.bank[color]++;
+                        }
+                        syncAndRefresh();
+                    }
+                };
+            });
+        }
+
         container.appendChild(playerDiv);
     });
 }
@@ -316,7 +456,7 @@ function renderAllPlayersStatus() {
 function renderPurchasedCardStacks() {
     const player = getCurrentPlayer();
     const container = document.getElementById('purchased-stacks-container');
-    document.getElementById('purchased-header').innerText = `Purchased Cards Inventory (Player ${player.id})`;
+    document.getElementById('purchased-header').innerText = `Purchased Cards Inventory (${player.playerName})`;
     container.innerHTML = '';
 
     if (player.purchasedCards.length === 0) {
@@ -326,9 +466,7 @@ function renderPurchasedCardStacks() {
 
     const groups = { emerald: [], diamond: [], sapphire: [], ruby: [], gold: [] };
     player.purchasedCards.forEach(card => {
-        if (groups[card.gem]) {
-            groups[card.gem].push(card);
-        }
+        if (groups[card.gem]) groups[card.gem].push(card);
     });
 
     for (let gemType in groups) {
@@ -337,18 +475,16 @@ function renderPurchasedCardStacks() {
 
         const stackCol = document.createElement('div');
         stackCol.className = 'card-stack-column';
-        stackCol.style.width = '65px';
+        stackCol.style.setProperty('--stack-count', cardsInGroup.length);
 
         cardsInGroup.forEach((card, idx) => {
             const cardDiv = document.createElement('div');
             cardDiv.className = 'staggered-card';
-            cardDiv.style.top = `${idx * 16}px`;
+            cardDiv.style.left = `${idx * 25}px`;
             cardDiv.style.zIndex = idx + 1;
-            cardDiv.innerHTML = `<img src="${card.image}" alt="Card">`;
+            cardDiv.innerHTML = `<img src="${card.image}" alt="Card" style="width:100%; height:100%; object-fit:contain;">`;
             stackCol.appendChild(cardDiv);
         });
-
-        stackCol.style.height = `${75 + (cardsInGroup.length - 1) * 16}px`;
         container.appendChild(stackCol);
     }
 }
@@ -358,74 +494,68 @@ function getTotalPlayerTokens(player) {
 }
 
 function drawCard(tierNumber) {
-    if (gameState.actionTakenThisTurn) {
-        alert("You already performed an action this turn!");
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
         return;
     }
-
+    if (gameState.actionTakenThisTurn) {
+        notify("You already performed an action this turn!", "Hold On", "warning");
+        return;
+    }
     const player = getCurrentPlayer();
     if (player.reservedCards.length >= 3) {
-        alert("Maximum 3 reserved cards allowed!");
+        notify("Maximum 3 reserved cards allowed!", "Reserve Limit Reached", "warning");
         return;
     }
-
     let drawnCard = drawCardFromDeck(tierNumber);
     if (!drawnCard) {
-        alert("This draw pile is empty!");
+        notify("This draw pile is empty!", "Empty Pile", "warning");
         return;
     }
-
     player.reservedCards.push(drawnCard);
     player.gems.joker++;
 
     gameState.actionTakenThisTurn = true;
-    updateUI();
-    renderAllMarkets();
+    syncAndRefresh();
 }
 
 function takeGemToken(gemType) {
-    const player = getCurrentPlayer();
-    if (gameState.actionTakenThisTurn && gameState.turnGemsPicked.length === 0) {
-        alert("You already performed a different action this turn!");
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
         return;
     }
-
+    const player = getCurrentPlayer();
+    if (gameState.actionTakenThisTurn && gameState.turnGemsPicked.length === 0) {
+        notify("You already performed a different action this turn!", "Hold On", "warning");
+        return;
+    }
     if (gameState.bank[gemType] <= 0) {
-        alert("That gem stack is empty!");
+        notify("That gem stack is empty!", "Empty Stack", "warning");
         return;
     }
 
     const currentPicks = gameState.turnGemsPicked;
-
     if (currentPicks.length === 2 && currentPicks[0] === currentPicks[1]) {
-        alert("You already took 2 tokens of the same color!");
+        notify("You already took 2 tokens of the same color!", "Token Limit", "warning");
         return;
     }
-
     if (currentPicks.length >= 3) {
-        alert("You can only take up to 3 tokens per turn!");
+        notify("You can only take up to 3 tokens per turn!", "Token Limit", "warning");
         return;
     }
-
     if (currentPicks.length === 1) {
-        if (currentPicks[0] === gemType) {
-            if (gameState.bank[gemType] < 1) {
-                alert("Not enough tokens left to take a pair!");
-                return;
-            }
-        } else {
-            if (currentPicks.includes(gemType)) {
-                alert("Cannot pick the same color twice when taking different chips!");
-                return;
-            }
-        }
-    }
-
-    if (currentPicks.length === 2) {
-        if (currentPicks.includes(gemType)) {
-            alert("Cannot pick a duplicate color when taking 3 different chips!");
+        if (currentPicks[0] === gemType && gameState.bank[gemType] < 1) {
+            notify("Not enough tokens left to take a pair!", "Not Enough Tokens", "warning");
             return;
         }
+        if (currentPicks[0] !== gemType && currentPicks.includes(gemType)) {
+            notify("Cannot pick the same color twice when taking different chips!", "Invalid Pick", "warning");
+            return;
+        }
+    }
+    if (currentPicks.length === 2 && currentPicks.includes(gemType)) {
+        notify("Cannot pick a duplicate color when taking 3 different chips!", "Invalid Pick", "warning");
+        return;
     }
 
     gameState.bank[gemType]--;
@@ -433,61 +563,40 @@ function takeGemToken(gemType) {
     gameState.turnGemsPicked.push(gemType);
     gameState.actionTakenThisTurn = true;
     
-    updateUI();
-}
-
-function returnToken(gemType) {
-    const player = getCurrentPlayer();
-    if (gemType === 'onyx' || gemType === 'joker') {
-        alert("Onyx and Joker tokens cannot be returned to the bank.");
-        return;
-    }
-
-    if (player.gems[gemType] > 0) {
-        player.gems[gemType]--;
-        gameState.bank[gemType]++;
-        updateUI();
-    } else {
-        alert(`You don't have any ${gemType} tokens to return!`);
-    }
+    syncAndRefresh();
 }
 
 function buyCard(tierNumber, index) {
-    if (gameState.actionTakenThisTurn) {
-        alert("You already performed an action this turn!");
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
         return;
     }
-
-    let marketArray;
-    if (tierNumber === 1) marketArray = gameState.marketTier1;
-    else if (tierNumber === 2) marketArray = gameState.marketTier2;
-    else if (tierNumber === 3) marketArray = gameState.marketTier3;
-
+    if (gameState.actionTakenThisTurn) {
+        notify("You already performed an action this turn!", "Hold On", "warning");
+        return;
+    }
+    let marketArray = tierNumber === 1 ? gameState.marketTier1 : (tierNumber === 2 ? gameState.marketTier2 : gameState.marketTier3);
     const card = marketArray[index];
     if (!card) return;
 
     processCardPurchase(card, tierNumber, () => {
         const nextCard = drawCardFromDeck(tierNumber);
-        if (nextCard) {
-            marketArray.splice(index, 1, nextCard);
-        } else {
-            marketArray.splice(index, 1, null);
-        }
+        marketArray.splice(index, 1, nextCard || null);
     });
 }
 
 function buyReservedCard(reservedIndex) {
-    if (gameState.actionTakenThisTurn) {
-        alert("You already performed an action this turn!");
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
         return;
     }
-
+    if (gameState.actionTakenThisTurn) {
+        notify("You already performed an action this turn!", "Hold On", "warning");
+        return;
+    }
     const player = getCurrentPlayer();
     const card = player.reservedCards[reservedIndex];
-
-    let tierNumber = 1;
-    if (card.id >= 2000 && card.id < 3000) tierNumber = 2;
-    if (card.id >= 3000) tierNumber = 3;
+    let tierNumber = card.id >= 3000 ? 3 : (card.id >= 2000 ? 2 : 1);
 
     processCardPurchase(card, tierNumber, () => {
         player.reservedCards.splice(reservedIndex, 1);
@@ -503,18 +612,16 @@ function processCardPurchase(card, tierNumber, removeCardCallback) {
         let required = card.cost[gem];
         let discount = player.bonuses[gem];
         let netCost = Math.max(0, required - discount);
-
         if (tempPlayerGems[gem] >= netCost) {
             tempPlayerGems[gem] -= netCost;
         } else {
-            let deficit = netCost - tempPlayerGems[gem];
+            deficitTotal += (netCost - tempPlayerGems[gem]);
             tempPlayerGems[gem] = 0;
-            deficitTotal += deficit;
         }
     }
 
     if (tempPlayerGems.joker < deficitTotal) {
-        alert("Not enough gems/jokers to buy this card!");
+        notify("Not enough gems/jokers to buy this card!", "Can't Afford That", "warning");
         return;
     }
 
@@ -522,15 +629,11 @@ function processCardPurchase(card, tierNumber, removeCardCallback) {
         let required = card.cost[gem];
         let discount = player.bonuses[gem];
         let netCost = Math.max(0, required - discount);
-
         let paidFromGem = Math.min(player.gems[gem], netCost);
         player.gems[gem] -= paidFromGem;
         gameState.bank[gem] += paidFromGem;
-
         let remainingDeficit = netCost - paidFromGem;
-        if (remainingDeficit > 0) {
-            player.gems.joker -= remainingDeficit;
-        }
+        if (remainingDeficit > 0) player.gems.joker -= remainingDeficit;
     }
 
     player.victoryPoints += card.points;
@@ -540,7 +643,7 @@ function processCardPurchase(card, tierNumber, removeCardCallback) {
     if (tierNumber === 3 && !player.hasReceivedOnyxToken) {
         player.hasReceivedOnyxToken = true;
         player.gems.onyx++;
-        alert(`Player ${player.id} purchased their first Tier 3 card and received 1 Onyx Token!`);
+        notify(`${player.playerName} purchased their first Tier 3 card and received 1 Onyx Token!`, "Bonus Reward", "success");
     }
 
     if (card.leaves > 0) {
@@ -550,133 +653,507 @@ function processCardPurchase(card, tierNumber, removeCardCallback) {
     
     removeCardCallback();
     checkNobles(player);
-
     gameState.actionTakenThisTurn = true;
-    updateUI();
-    renderAllMarkets();
+    syncAndRefresh();
+}
+
+// Onyx has no discount equivalent, so it must still be held as an actual
+// token. The other five colors can be satisfied either by holding a token
+// of that color OR by already having a purchased-card discount in it.
+// The Joker is not required at all.
+function meetsRingRequirements(player) {
+    const hasEnoughPoints = player.victoryPoints >= 16;
+    const hasOnyx = player.gems.onyx >= 1;
+    const hasOtherColors = ['emerald', 'diamond', 'sapphire', 'ruby', 'gold']
+        .every(g => (player.gems[g] + player.bonuses[g]) >= 1);
+    return hasEnoughPoints && hasOnyx && hasOtherColors;
 }
 
 function tryClaimRing() {
-    const player = getCurrentPlayer();
-
-    let hasEnoughPoints = player.victoryPoints >= 16;
-    let hasAllTokens = player.gems.emerald >= 1 &&
-                       player.gems.diamond >= 1 &&
-                       player.gems.sapphire >= 1 &&
-                       player.gems.ruby >= 1 &&
-                       player.gems.gold >= 1 &&
-                       player.gems.onyx >= 1;
-
-    if (!hasEnoughPoints || !hasAllTokens) {
-        alert(`Cannot claim The Ring yet! Requirements:\n- Minimum 16 Victory Points (You have ${player.victoryPoints})\n- At least 1 token of every color including Gold, Onyx, and Joker`);
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
         return;
     }
 
-    alert(`SUCCESS! Player ${player.id} claimed The Ring and won the game with ${player.victoryPoints} Victory Points!`);
+    const player = getCurrentPlayer();
+
+    if (gameState.ringActive) {
+        const activator = players.find(p => p.id === gameState.ringActivatorId);
+        notify(`The Ring was already claimed by ${activator ? activator.playerName : 'another player'} — the final round is underway.`, "Final Round In Progress", "info");
+        return;
+    }
+
+    if (!meetsRingRequirements(player)) {
+        notify(`Requirements:\n- Minimum 16 Victory Points (You have ${player.victoryPoints})\n- At least 1 Onyx token\n- At least 1 of each other color (Emerald, Diamond, Sapphire, Ruby, Gold) — from tokens or discounts`, "Cannot Claim The Ring Yet", "warning");
+        return;
+    }
+
+    gameState.ringActive = true;
+    gameState.ringActivatorId = player.id;
+    updateRingArtState();
+
+    notify(`${player.playerName} has claimed The Ring! A final round begins — play continues until it comes back around to ${player.playerName}'s turn. Whoever has the most Victory Points when the final round ends wins (ties broken by whoever holds the most Lorien Leaves)!`, "🔥 The Ring Has Been Claimed!", "success");
+
+    gameState.actionTakenThisTurn = true;
+    syncAndRefresh();
+}
+
+// If the Ring-holder's eligibility slips away mid-final-round (most likely
+// because the Lorien Leaf changed hands and took 3 Victory Points with it),
+// the final round is called off and play just continues normally until
+// someone claims The Ring again.
+function checkRingActivatorStillEligible() {
+    if (!gameState.ringActive || gameState.gameEnded) return;
+    const activator = players.find(p => p.id === gameState.ringActivatorId);
+    if (!activator || !meetsRingRequirements(activator)) {
+        notify(`${activator ? activator.playerName : 'The Ring holder'} no longer meets The Ring's requirements. The final round has been cancelled — the game continues until someone claims The Ring again.`, "Final Round Cancelled", "warning");
+        gameState.ringActive = false;
+        gameState.ringActivatorId = null;
+        updateRingArtState();
+    }
+}
+
+// Formats a list of names as "A", "A and B", or "A, B and C".
+function formatNameList(names) {
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+// Called when play makes it all the way back around to whoever activated
+// the final round.
+function declareGameWinner() {
+    const maxPoints = Math.max(...players.map(p => p.victoryPoints));
+    let winners = players.filter(p => p.victoryPoints === maxPoints);
+    let tieNote = '';
+
+    if (winners.length > 1) {
+        const maxLeaves = Math.max(...winners.map(p => p.leaves));
+        const leafWinners = winners.filter(p => p.leaves === maxLeaves);
+
+        if (leafWinners.length === 1) {
+            winners = leafWinners;
+            tieNote = ' after a tiebreaker on Lorien Leaf count';
+        } else {
+            // Still tied even after the Lorien Leaf tiebreaker - it's a
+            // shared win between everyone still tied.
+            winners = leafWinners;
+            tieNote = ' — also tied on Lorien Leaf count, so the win is shared';
+        }
+    }
+
+    gameState.ringActive = false;
+    gameState.gameEnded = true;
+    updateRingArtState();
+
+    const names = formatNameList(winners.map(p => p.playerName));
+    const verb = winners.length > 1 ? 'win' : 'wins';
+    const pointsLabel = winners.length > 1 ? `${maxPoints} Victory Points each` : `${maxPoints} Victory Points`;
+
+    notify(`The final round is complete! ${names} ${verb} the game with ${pointsLabel}${tieNote}!`, "🏆 Game Over!", "success");
+}
+
+// Visually marks the Ring once it has been claimed (dims it during the
+// final round and keeps it dimmed once the game has ended).
+function updateRingArtState() {
+    const ringContainer = document.getElementById('ring-card-container');
+    if (!ringContainer) return;
+    if (gameState.ringActive || gameState.gameEnded) {
+        ringContainer.classList.add('ring-final-round');
+    } else {
+        ringContainer.classList.remove('ring-final-round');
+    }
 }
 
 function checkLorienLeaf(activePlayer) {
-    if (activePlayer.leaves < 3) return;
+    if (activePlayer.leaves < 3) {
+        if (lorienHolderId !== null && players.find(p => p.id === lorienHolderId).leaves < 3) {
+            let currentHolder = players.find(p => p.id === lorienHolderId);
+            if (currentHolder) currentHolder.victoryPoints -= 3;
+            lorienHolderId = null;
+        }
+        return;
+    }
+
+    let eligiblePlayers = players.filter(p => p.leaves >= 3);
+    if (eligiblePlayers.length === 0) return;
+
+    let maxLeaves = Math.max(...eligiblePlayers.map(p => p.leaves));
+    let topPlayers = eligiblePlayers.filter(p => p.leaves === maxLeaves);
+
+    if (topPlayers.length > 1) {
+        if (lorienHolderId !== null) {
+            let currentHolder = players.find(p => p.id === lorienHolderId);
+            if (currentHolder) currentHolder.victoryPoints -= 3;
+            lorienHolderId = null;
+        }
+        return;
+    }
+
+    let newLeader = topPlayers[0];
 
     if (lorienHolderId === null) {
-        lorienHolderId = activePlayer.id;
-        activePlayer.victoryPoints += 3;
-        alert(`Player ${activePlayer.id} reached 3+ leaves, claimed the Lorien Leaf, and gained 3 Victory Points!`);
-    } else if (lorienHolderId !== activePlayer.id) {
+        lorienHolderId = newLeader.id;
+        newLeader.victoryPoints += 3;
+        notify(`${newLeader.playerName} reached the most leaves (or broke the tie), claimed the Lorien Leaf, and gained 3 Victory Points!`, "Lorien Leaf Claimed", "success");
+    } else if (lorienHolderId !== newLeader.id) {
         let currentHolder = players.find(p => p.id === lorienHolderId);
-        if (activePlayer.leaves > currentHolder.leaves) {
-            currentHolder.victoryPoints -= 3;
-            lorienHolderId = activePlayer.id;
-            activePlayer.victoryPoints += 3;
-            alert(`Player ${activePlayer.id} surpassed the previous leaf count, taking control of the Lorien Leaf and its 3 Victory Points!`);
-        }
+        if (currentHolder) currentHolder.victoryPoints -= 3;
+        
+        lorienHolderId = newLeader.id;
+        newLeader.victoryPoints += 3;
+        notify(`${newLeader.playerName} took control of the Lorien Leaf and its 3 Victory Points!`, "Lorien Leaf Claimed", "success");
     }
-    updateLorienDisplay();
 }
 
-function updateLorienDisplay() {
-    const currentPlayer = getCurrentPlayer();
-    document.getElementById('p-has-lorien').style.display = (currentPlayer.id === lorienHolderId) ? 'inline' : 'none';
+// Shows the Lorien Leaf art at the top only while the leaf is unclaimed
+// (no one holds it yet, or it just became contested/returned). Hides it
+// as soon as a player claims it, since it now belongs to that player.
+function updateLorienArtVisibility() {
+    const panel = document.getElementById('lorien-panel');
+    if (!panel) return;
+    panel.style.display = lorienHolderId === null ? 'flex' : 'none';
 }
 
 function checkNobles(player) {
     for (let i = gameState.activeDestinations.length - 1; i >= 0; i--) {
         const noble = gameState.activeDestinations[i];
-        let qualifies = true;
-
-        for (let gem in noble.requirements) {
-            if (player.bonuses[gem] < noble.requirements[gem]) {
-                qualifies = false;
-                break;
-            }
-        }
-
+        if (!noble) continue;
+        let qualifies = Object.keys(noble.requirements).every(gem => player.bonuses[gem] >= noble.requirements[gem]);
         if (qualifies) {
             player.victoryPoints += noble.points;
-            gameState.activeDestinations.splice(i, 1);
-            alert(`Player ${player.id} reached a Destination and gained 3 Victory Points!`);
+            // Leave the slot in place (as null) instead of splicing it out,
+            // so the other destination cards don't shift over.
+            gameState.activeDestinations[i] = null;
+            notify(`${player.playerName} automatically met requirements for a Destination card, gained 3 Victory Points, and claimed it!`, "Destination Reached", "success");
             renderNobles();
             break;
         }
     }
 }
 
-function endTurn() {
+async function endTurn() {
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
+        return;
+    }
+
     const player = getCurrentPlayer();
     if (!gameState.actionTakenThisTurn) {
-        let proceed = confirm("No action taken this turn. Pass anyway?");
-        if (!proceed) return;
+        const confirmed = await showModal({ title: "No Action Taken", message: "No action taken this turn. Pass anyway?", type: "confirm", variant: "warning" });
+        if (!confirmed) return;
     }
 
     if (getTotalPlayerTokens(player) > 10) {
-        alert("You have more than 10 total tokens! Click tokens in your inventory to return them until you have 10 or fewer.");
+        notify("You have more than 10 total tokens! Return some by clicking your excess tokens before ending your turn.", "Too Many Tokens", "warning");
         return;
     }
 
     activePlayerIndex = (activePlayerIndex + 1) % numPlayers;
-    if (activePlayerIndex === 0) {
-        gameState.turnNumber++;
-    }
+    if (activePlayerIndex === 0) gameState.turnNumber++;
 
     gameState.actionTakenThisTurn = false;
     gameState.turnGemsPicked = [];
-    updateUI();
-    renderAllMarkets();
-    updateLorienDisplay();
+    
+    players.forEach(p => checkNobles(p));
+    checkRingActivatorStillEligible();
+
+    // If it's made it all the way back around to whoever activated the
+    // Ring's final round, the game is over.
+    if (gameState.ringActive && getCurrentPlayer().id === gameState.ringActivatorId) {
+        declareGameWinner();
+    }
+
+    syncAndRefresh();
 }
 
 function updateUI() {
     const player = getCurrentPlayer();
-
     for (let gem in gameState.bank) {
         document.getElementById(`bank-${gem}`).innerText = gameState.bank[gem];
-        
         const bankItemElem = document.querySelector(`.bank-token-item img[alt="${gem.charAt(0).toUpperCase() + gem.slice(1)}"]`);
-        if (bankItemElem) {
-            bankItemElem.style.display = gameState.bank[gem] > 0 ? 'block' : 'none';
-        }
-
-        document.getElementById(`p-${gem}`).innerText = player.gems[gem];
-        if (gem !== 'gold' && gem !== 'onyx' && document.getElementById(`b-${gem}`)) {
-            document.getElementById(`b-${gem}`).innerText = player.bonuses[gem];
-        }
+        if (bankItemElem) bankItemElem.style.display = gameState.bank[gem] > 0 ? 'block' : 'none';
     }
 
-    document.getElementById('p-onyx-token').innerText = player.gems.onyx;
-    document.getElementById('p-joker').innerText = player.gems.joker;
-    document.getElementById('b-gold').innerText = player.bonuses.gold;
+    [1, 2, 3].forEach(tier => {
+        const pileElem = document.getElementById(`draw-pile-${tier}`);
+        if (gameState.decks[tier].length === 0) {
+            pileElem.style.visibility = 'hidden';
+        } else {
+            pileElem.style.visibility = 'visible';
+        }
+    });
 
-    let totalTokens = getTotalPlayerTokens(player);
     document.getElementById('turn-indicator').innerText = `Turn: ${gameState.turnNumber}`;
-    document.getElementById('player-turn-indicator').innerText = `Player ${player.id}'s Turn`;
-    document.getElementById('score-indicator').innerText = `VP: ${player.victoryPoints} / 16`;
-    document.getElementById('token-count-indicator').innerText = `Tokens: ${totalTokens} / 10`;
+    document.getElementById('player-turn-indicator').innerText = `${player.playerName}'s Turn`;
     document.getElementById('turn-gems-tracker').innerText = gameState.turnGemsPicked.join(', ') || 'None';
-    document.getElementById('p-leaves').innerText = player.leaves;
 
+    updateLorienArtVisibility();
+    updateRingArtState();
     renderPurchasedCardStacks();
     renderAllPlayersStatus();
 }
 
-initGroupGame = initGame();
-initGame();
+// --- MULTIPLAYER P2P SYNC HANDLERS ---
+function openPlayerSelection(isMulti) {
+    hostingForMultiplayer = !!isMulti;
+    document.getElementById('select-title').innerText = hostingForMultiplayer ? "Host: Choose Player Count" : "Select Player Count";
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('player-select-menu').style.display = 'flex';
+}
+
+function closePlayerSelection() {
+    document.getElementById('player-select-menu').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'flex';
+}
+
+async function handlePlayerCountChosen(count) {
+    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 1" });
+    if (enteredName && enteredName.trim() !== "") {
+        localPlayerName = enteredName.trim();
+    }
+
+    document.getElementById('player-select-menu').style.display = 'none';
+    document.getElementById('game-container').style.display = 'flex';
+
+    if (hostingForMultiplayer) {
+        startHostingGame(count);
+    } else {
+        let allNames = [localPlayerName];
+        for(let i=2; i<=count; i++) {
+            let pName = await showModal({ title: "Player Name", message: `Enter name for Player ${i}:`, type: "prompt", defaultValue: `Player ${i}` });
+            allNames.push(pName ? pName.trim() : `Player ${i}`);
+        }
+        initGame(count, allNames);
+    }
+}
+
+function startHostingGame(count) {
+    isHost = true;
+    isMultiplayerMode = true;
+    peer = new Peer();
+
+    peer.on('open', async (id) => {
+        await showModal({ title: "Room Hosted!", message: "Copy and send this room code to your friends so they can join:", type: "roomcode", code: id, variant: "success" });
+        let hostNames = [localPlayerName];
+        for(let i=2; i<=count; i++) hostNames.push(`Player ${i}`);
+        initGame(count, hostNames);
+    });
+
+    peer.on('connection', (connection) => {
+        conn = connection;
+        setupPeerConnectionListeners();
+        notify("A friend connected to your game session!", "Player Connected", "success");
+        broadcastState();
+    });
+}
+
+async function promptJoinGame() {
+    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 2" });
+    if (enteredName && enteredName.trim() !== "") {
+        localPlayerName = enteredName.trim();
+    }
+
+    let code = await showModal({ title: "Join Game", message: "Enter the host's room code:", type: "prompt" });
+    if (!code) return;
+
+    isHost = false;
+    isMultiplayerMode = true;
+    peer = new Peer();
+
+    peer.on('open', () => {
+        conn = peer.connect(code.trim());
+        
+        conn.on('open', () => {
+            notify("Successfully connected to the host!", "Connected!", "success");
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('game-container').style.display = 'flex';
+            
+            conn.send({ type: 'UPDATE_PLAYER_NAME', name: localPlayerName });
+        });
+
+        setupPeerConnectionListeners();
+    });
+}
+
+function setupPeerConnectionListeners() {
+    conn.on('data', (data) => {
+        if (data.type === 'SYNC_STATE') {
+            Object.assign(gameState, data.gameState);
+            numPlayers = data.numPlayers;
+            activePlayerIndex = data.activePlayerIndex;
+            lorienHolderId = data.lorienHolderId;
+            players = data.players;
+            
+            updateUI();
+            renderAllMarkets();
+            renderNobles();
+        } else if (data.type === 'CHAT_MESSAGE') {
+            appendChatMessage(data.sender, data.message);
+        } else if (data.type === 'UPDATE_PLAYER_NAME' && isHost) {
+            let targetPlayer = players.find(p => p.id > 1 && p.playerName.startsWith("Player "));
+            if (targetPlayer) {
+                targetPlayer.playerName = data.name;
+                broadcastState();
+                updateUI();
+            }
+        }
+    });
+}
+
+function broadcastState() {
+    if (isMultiplayerMode && isHost && conn && conn.open) {
+        conn.send({
+            type: 'SYNC_STATE',
+            gameState: gameState,
+            numPlayers: numPlayers,
+            activePlayerIndex: activePlayerIndex,
+            lorienHolderId: lorienHolderId,
+            players: players
+        });
+    }
+}
+
+function syncAndRefresh() {
+    players.forEach(p => checkNobles(p));
+    checkRingActivatorStillEligible();
+    updateUI();
+    renderAllMarkets();
+    if (isMultiplayerMode) {
+        broadcastState();
+    }
+}
+
+// --- PAUSE MENU & ESCAPE KEY HANDLERS ---
+function togglePauseMenu() {
+    const pauseMenu = document.getElementById('pause-menu');
+    const isVisible = pauseMenu.style.display === 'flex';
+    pauseMenu.style.display = isVisible ? 'none' : 'flex';
+}
+
+async function returnToMainMenu() {
+    const confirmed = await showModal({ title: "Quit to Main Menu?", message: "Are you sure you want to quit to the main menu? Any active game progress will be lost.", type: "confirm", variant: "warning" });
+    if (!confirmed) {
+        return;
+    }
+
+    document.getElementById('pause-menu').style.display = 'none';
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'flex';
+
+    if (peer) {
+        peer.destroy();
+        peer = null;
+        conn = null;
+        isMultiplayerMode = false;
+        isHost = false;
+    }
+}
+
+// --- MULTIPLAYER CHAT SYSTEM ---
+document.addEventListener('DOMContentLoaded', () => {
+    const chatInput = document.getElementById('chat-input');
+    const chatContainer = document.getElementById('chat-container');
+
+    if (chatContainer && !document.getElementById('chat-close-btn')) {
+        const closeBtn = document.createElement('span');
+        closeBtn.id = 'chat-close-btn';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.style.cssText = 'position: absolute; top: 5px; right: 8px; cursor: pointer; font-size: 18px; font-weight: bold; color: #aaa; z-index: 10;';
+        closeBtn.onmouseover = () => closeBtn.style.color = '#fff';
+        closeBtn.onmouseout = () => closeBtn.style.color = '#aaa';
+        closeBtn.onclick = () => {
+            chatInput.value = '';
+            chatInput.blur();
+            chatContainer.style.display = 'none';
+        };
+        if (window.getComputedStyle(chatContainer).position === 'static') {
+            chatContainer.style.position = 'relative';
+        }
+        chatContainer.appendChild(closeBtn);
+    }
+
+    if (chatInput) {
+        chatInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault(); 
+                event.stopPropagation();
+                
+                let messageText = chatInput.value.trim();
+                if (messageText !== "") {
+                    sendChatMessage(messageText);
+                }
+                chatInput.value = '';
+            }
+        });
+    }
+});
+
+window.addEventListener('keydown', (event) => {
+    const gameContainer = document.getElementById('game-container');
+    if (!gameContainer || gameContainer.style.display !== 'flex') return;
+
+    const chatContainer = document.getElementById('chat-container');
+    const chatInput = document.getElementById('chat-input');
+
+    if (event.key === 'Enter') {
+        const pauseMenu = document.getElementById('pause-menu');
+        if (pauseMenu && pauseMenu.style.display === 'flex') return;
+
+        if (chatContainer.style.display !== 'flex') {
+            chatContainer.style.display = 'flex';
+            chatInput.focus();
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    } else if (event.key === 'Escape') {
+        if (document.activeElement === chatInput) {
+            chatInput.value = '';
+            chatInput.blur();
+            chatContainer.style.display = 'none';
+            event.stopPropagation();
+        } else {
+            const pauseMenu = document.getElementById('pause-menu');
+            if (pauseMenu) {
+                togglePauseMenu();
+            }
+        }
+    }
+});
+
+function sendChatMessage(text) {
+    const player = getCurrentPlayer();
+    const senderName = player.playerName;
+    
+    appendChatMessage(senderName, text);
+
+    if (isMultiplayerMode && conn && conn.open) {
+        conn.send({ type: 'CHAT_MESSAGE', sender: senderName, message: text });
+    }
+}
+
+function appendChatMessage(sender, text) {
+    const chatMessages = document.getElementById('chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-msg';
+    msgDiv.innerHTML = `<strong>${escapeHtml(sender)}:</strong> ${escapeHtml(text)}`;
+    chatMessages.appendChild(msgDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function openSettings() {
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('settings-menu').style.display = 'flex';
+}
+function closeSettings() {
+    document.getElementById('settings-menu').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'flex';
+}
+function quitGame() {
+    window.close();
+    notify("Thanks for playing! You can now close this tab.", "Goodbye!", "info");
+}
