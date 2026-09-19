@@ -19,18 +19,12 @@ body {
     background: #2a475e;
     border: 2px solid #4e6d8c;
     border-radius: 8px;
-    padding: 8px;
+    padding: 10px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     overflow: visible;
-}
-
-h1 {
-    text-align: center;
-    color: #66c0f4;
-    font-size: 18px;
-    margin: 0 0 4px 0;
+    position: relative;
 }
 
 #status-bar {
@@ -38,31 +32,33 @@ h1 {
     justify-content: space-between;
     align-items: center;
     background: #171a21;
-    padding: 5px 10px;
+    padding: 6px 12px;
     border-radius: 4px;
-    font-size: 12px;
-    margin-bottom: 4px;
+    font-size: 13px;
+    margin-bottom: 6px;
     flex-shrink: 0;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
 }
 
 #top-extra-row {
-    display: flex;
-    justify-content: center;
+    /* Fixed-width grid tracks so claiming a destination card or the Lorien
+       Leaf never reshuffles the other items in this row — the Ring
+       especially must stay put no matter what gets hidden/removed
+       elsewhere in the row. */
+    display: grid;
+    grid-template-columns: 340px 1fr 185px;
     align-items: center;
     background: #171a21;
-    padding: 8px 12px;
+    padding: 10px 14px;
     border-radius: 4px;
-    margin-bottom: 6px;
-    gap: 16px;
+    margin-bottom: 8px;
+    gap: 35px;
     flex-shrink: 0;
-    padding-left: 0px;
-    padding-right: 0px; 
 }
 
 #ring-card-container {
-    width: 300px;
+    width: 340px;
     cursor: pointer;
     background: transparent;
     border: none;
@@ -78,15 +74,20 @@ h1 {
     filter: drop-shadow(0px 3px 6px rgba(0,0,0,0.6));
 }
 
+/* Applied once The Ring has been claimed (final round underway or over) */
+#ring-card-container.ring-final-round #ring-art {
+    filter: drop-shadow(0px 3px 6px rgba(0,0,0,0.6)) grayscale(0.65) brightness(0.75);
+}
+
 #nobles-container {
     display: flex;
-    gap: 10px;
+    gap: 15px;
     justify-content: center;
     align-items: center;
 }
 
 .noble-card {
-    width: 160px;
+    width: 185px;
     background: transparent;
     border: none;
     display: flex;
@@ -101,8 +102,9 @@ h1 {
     box-shadow: 0px 3px 6px rgba(0,0,0,0.5);
 }
 
+/* Lorien Leaf Art sized to match the noble cards exactly (185px) */
 #lorien-panel {
-    width: 160px;
+    width: 185px;
     background: transparent;
     border: none;
     flex-shrink: 0;
@@ -120,8 +122,8 @@ h1 {
 /* MAIN LAYOUT GRID */
 #main-layout {
     display: grid;
-    grid-template-columns: 200px 1fr 280px;
-    gap: 10px;
+    grid-template-columns: 220px 1fr 490px;
+    gap: 12px;
     flex-grow: 1;
     min-height: 0;
     overflow: visible;
@@ -130,31 +132,27 @@ h1 {
 .panel {
     background: #171a21;
     border-radius: 4px;
-    padding: 6px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
     min-height: 0;
     overflow: visible;
 }
 
-#player-area {
-    overflow-y: visible;
-}
-
 .panel h3 {
-    margin: 0 0 4px 0;
-    font-size: 12px;
+    margin: 0 0 6px 0;
+    font-size: 15px;
     color: #66c0f4;
     border-bottom: 1px solid #4e6d8c;
-    padding-bottom: 2px;
+    padding-bottom: 3px;
     flex-shrink: 0;
 }
 
-/* BANK TOKENS - MAX SIZE, TIGHTLY PACKED, MINIMAL BORDER RADIUS */
+/* BANK TOKENS */
 #token-grid {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 40px;
     align-items: center;
     justify-content: center;
     overflow: visible;
@@ -164,8 +162,8 @@ h1 {
 
 .bank-token-item {
     position: relative;
-    width: 150px;
-    height: 75px;
+    width: 170px;
+    height: 85px;
     cursor: pointer;
     transition: transform 0.1s;
     flex-shrink: 0;
@@ -177,12 +175,11 @@ h1 {
 
 .bank-token-item:hover {
     transform: scale(1.05);
-    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .bank-token-item img {
-    width: 180px;
-    height: 180px;
+    width: 210px;
+    height: 210px;
     object-fit: contain;
     filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));
     pointer-events: none;
@@ -190,37 +187,33 @@ h1 {
 
 .token-badge {
     position: absolute;
-    top: 50%;
-    left: calc(100% - 15px);
-    transform: translateY(-50%);
+    top: calc(100% - 4px);
+    left: 50%;
+    transform: translateX(-50%);
     background: #e74c3c;
     color: white;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: bold;
-    padding: 2px 6px;
+    padding: 2px 10px;
     border-radius: 10px;
     border: 1px solid #fff;
     z-index: 2;
     white-space: nowrap;
 }
 
-/* MARKET SECTION - SCROLLABLE TIERS, LARGER & CENTERED CARDS */
-.panel:nth-child(2) {
-    overflow-y: visible;
-}
-
+/* MARKET SECTION */
 .tier-row {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    margin-bottom: 14px;
+    gap: 16px;
+    margin-bottom: 16px;
     flex-shrink: 0;
 }
 
 .draw-pile {
     aspect-ratio: 5 / 7;
-    width: 170px;
+    width: 195px;
     height: auto;
     background: transparent;
     border: none;
@@ -249,17 +242,18 @@ h1 {
 
 .card-market {
     display: flex;
-    gap: 12px;
+    gap: 14px;
     justify-content: flex-start;
     flex-shrink: 0;
 }
 
 #reserved-cards-container {
     display: flex;
-    gap: 8px;
+    gap: 12px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding-bottom: 4px;
+    padding-top: 6px;
+    padding-bottom: 6px;
     max-width: 100%;
 }
 
@@ -276,11 +270,11 @@ h1 {
 }
 
 #market-panel .card {
-    width: 170px;
+    width: 195px;
 }
 
 #reserved-cards-container .card {
-    width: 75px;
+    width: 140px;
 }
 
 .card:hover {
@@ -294,54 +288,44 @@ h1 {
     object-fit: cover;
 }
 
-.inv-token-item {
-    position: relative;
-    width: 28px;
-    height: 28px;
-    cursor: pointer;
-}
-
-.inv-token-item img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-
-#player-token-grid {
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-    justify-content: center;
-}
-
+/* HORIZONTAL PURCHASED STACKS CONFIGURATION FIXED */
 #purchased-stacks-container {
     display: flex;
-    gap: 10px;
-    margin-top: 4px;
+    flex-direction: row;
+    flex-wrap: nowrap;
     overflow-x: auto;
-    padding-bottom: 4px;
+    gap: 12px;
+    margin-top: 6px;
+    padding-bottom: 6px;
     flex-grow: 1;
     min-height: 0;
+    align-items: flex-start;
 }
 
 .card-stack-column {
-    display: flex;
-    flex-direction: column;
     position: relative;
-    width: 85px;
-    height: 100%;
-    min-height: 130px;
+    min-width: calc(80px + (var(--stack-count, 1) - 1) * 25px);
+    height: 112px;
+    flex-shrink: 0;
 }
 
 .staggered-card {
     position: absolute;
+    top: 0;
     aspect-ratio: 5 / 7;
-    width: 85px;
+    width: 80px;
+    height: 112px;
     border: 1px solid #4e6d8c;
     border-radius: 4px;
     overflow: hidden;
     background: #171a21;
     box-shadow: 0px 2px 5px rgba(0,0,0,0.5);
+    transition: transform 0.2s ease;
+}
+
+.staggered-card:hover {
+    transform: translateY(-8px);
+    z-index: 999 !important;
 }
 
 .staggered-card img {
@@ -350,9 +334,223 @@ h1 {
     object-fit: cover;
 }
 
+/* Right-hand Sidebar Panel */
+.panel:nth-child(3) {
+    position: relative;
+    overflow-y: visible;
+}
+
+/* Larger Player Status Elements and Text Inside Right Box */
+#all-players-status-container > div {
+    font-size: 16px !important;
+    padding: 10px 12px !important;
+    margin-bottom: 8px !important;
+}
+
+#all-players-status-container img {
+    width: 28px !important;
+    height: 28px !important;
+}
+
+/* Scaled-up Circular End Turn Button */
+#end-turn-btn {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 75px;
+    height: 75px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #66c0f4, #2a475e);
+    color: #ffffff;
+    border: 2px solid #66c0f4;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.6);
+    transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    z-index: 50;
+    line-height: 1.1;
+}
+
+#end-turn-btn:hover {
+    transform: translateX(-50%) scale(1.08) translateY(-2px);
+    background: linear-gradient(135deg, #1abc9c, #16a085);
+    border-color: #ffffff;
+    box-shadow: 0px 6px 14px rgba(26, 188, 156, 0.4);
+}
+
+#end-turn-btn:active {
+    transform: translateX(-50%) scale(0.98);
+}
+
+/* Header Container for Title and Cog */
+#game-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+}
+
+h1 {
+    text-align: center;
+    color: #66c0f4;
+    font-size: 20px;
+    margin: 0;
+}
+
+/* Cogwheel Pause Button */
+#cog-btn {
+    position: absolute;
+    right: 5px;
+    background: rgba(44, 62, 80, 0.9);
+    border: 1px solid #4e6d8c;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
+    color: #ecf0f1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, transform 0.2s;
+    z-index: 100;
+}
+
+#cog-btn:hover {
+    background: #1abc9c;
+    transform: rotate(45deg);
+}
+
+#pause-menu {
+    display: none;
+}
+
+#chat-container {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    width: 340px;
+    background: rgba(23, 26, 33, 0.95);
+    border: 1px solid #4e6d8c;
+    border-radius: 6px;
+    padding: 10px;
+    z-index: 200;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#chat-messages {
+    height: 130px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #c7d5e0;
+    border-bottom: 1px solid #4e6d8c;
+    padding-bottom: 6px;
+}
+
+.chat-msg {
+    background: rgba(42, 71, 94, 0.5);
+    padding: 4px 8px;
+    border-radius: 3px;
+    word-break: break-word;
+}
+
+#chat-input {
+    background: #1b2838;
+    border: 1px solid #4e6d8c;
+    color: #fff;
+    padding: 6px 8px;
+    font-size: 13px;
+    border-radius: 4px;
+    outline: none;
+}
+
+#chat-input:focus {
+    border-color: #66c0f4;
+}
+
+.menu-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(23, 26, 33, 0.92);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.menu-box {
+    background: #2a475e;
+    border: 2px solid #4e6d8c;
+    border-radius: 8px;
+    padding: 30px 40px;
+    text-align: center;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 320px;
+}
+
+.menu-box h1 {
+    font-size: 26px;
+    margin-bottom: 20px;
+    color: #66c0f4;
+}
+
+.menu-box h2 {
+    font-size: 22px;
+    margin-bottom: 10px;
+    color: #66c0f4;
+}
+
+.menu-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    margin-top: 15px;
+}
+
+.menu-buttons button {
+    background-color: #1b2838;
+    color: #c7d5e0;
+    border: 1px solid #4e6d8c;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.menu-buttons button:hover {
+    background-color: #66c0f4;
+    color: #171a21;
+    border-color: #66c0f4;
+    transform: translateY(-2px);
+}
+
 /* MOBILE RESPONSIVE OVERRIDES */
 @media screen and (max-width: 1024px) {
     #top-extra-row {
+        display: flex !important;
         flex-direction: column !important;
         gap: 10px !important;
     }
@@ -364,18 +562,129 @@ h1 {
         flex-direction: column !important;
     }
     .bank-token-item {
-        width: 110px !important;
-        height: 55px !important;
+        width: 120px !important;
+        height: 60px !important;
     }
     .bank-token-item img {
-        width: 130px !important;
-        height: 130px !important;
+        width: 140px !important;
+        height: 140px !important;
     }
     #market-panel .card, .draw-pile {
-        width: 130px !important;
+        width: 140px !important;
     }
     .card-market {
         flex-wrap: wrap !important;
         justify-content: center !important;
     }
+}
+/* ============================
+   CUSTOM POPUP MODAL
+   (replaces browser alert/confirm/prompt)
+   ============================ */
+.modal-box {
+    max-width: 420px;
+    animation: modal-pop 0.16s ease-out;
+}
+
+@keyframes modal-pop {
+    from { transform: scale(0.92); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+#custom-modal-icon {
+    font-size: 34px;
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+#custom-modal-message {
+    color: #bdc3c7;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-line;
+    margin: 0 0 6px 0;
+}
+
+.modal-box.modal-warning {
+    border-color: #e74c3c;
+}
+.modal-box.modal-warning h2 {
+    color: #e74c3c;
+}
+.modal-box.modal-success {
+    border-color: #1abc9c;
+}
+.modal-box.modal-success h2 {
+    color: #1abc9c;
+}
+
+#custom-modal-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1b2838;
+    border: 1px solid #4e6d8c;
+    color: #fff;
+    padding: 10px 12px;
+    font-size: 15px;
+    border-radius: 4px;
+    outline: none;
+    margin-top: 14px;
+}
+
+#custom-modal-input:focus {
+    border-color: #66c0f4;
+}
+
+#custom-modal-code-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    width: 100%;
+}
+
+#custom-modal-code {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1b2838;
+    border: 1px dashed #66c0f4;
+    color: #66c0f4;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 15px;
+    letter-spacing: 1px;
+    padding: 12px 10px;
+    border-radius: 4px;
+    text-align: center;
+    word-break: break-all;
+}
+
+#custom-modal-copy-btn {
+    background-color: #1b2838;
+    color: #c7d5e0;
+    border: 1px solid #4e6d8c;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+}
+
+#custom-modal-copy-btn:hover {
+    background-color: #66c0f4;
+    color: #171a21;
+    border-color: #66c0f4;
+}
+
+#custom-modal-buttons {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+#custom-modal-buttons button {
+    flex: 1;
+    min-width: 100px;
 }
