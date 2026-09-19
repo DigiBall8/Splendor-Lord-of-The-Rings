@@ -518,7 +518,7 @@ h1 {
 #player-select-menu {
     background-image:
         linear-gradient(rgba(21, 17, 14, 0.6), rgba(21, 17, 14, 0.8)),
-        url("Menu_background.jpg");
+        url("menu_background.jpg");
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
