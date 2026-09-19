@@ -92,6 +92,17 @@ function notify(message, title = 'Notice', variant = 'info') {
     showModal({ title, message, type: 'alert', variant });
 }
 
+// Like notify(), but for game events everyone should see (claiming the
+// Lorien Leaf, a Destination card, The Ring, or the game being won) -
+// shows the popup locally right away AND queues it to go out with the
+// next state sync so every other connected player sees it too.
+function announceToAll(message, title = 'Notice', variant = 'info') {
+    notify(message, title, variant);
+    if (isMultiplayerMode) {
+        pendingBroadcastEvents.push({ message, title, variant });
+    }
+}
+
 let numPlayers = 4;
 let activePlayerIndex = 0;
 let lorienHolderId = null;
@@ -107,6 +118,8 @@ let isHost = false;
 let isMultiplayerMode = false;
 let hostingForMultiplayer = false;
 let myPlayerId = 1;             // which player THIS browser tab is allowed to act as
+let roomCode = null;            // the 6-digit code guests use to join our room (host only)
+let pendingBroadcastEvents = []; // game-event popups (leaf/destination/ring/winner) waiting to go out with the next state sync
 
 const CARD_DATABASE = {
     1: {
@@ -290,10 +303,29 @@ function preloadGameImages() {
 
     gameState.destinationsPool.forEach(d => urls.push(d.image));
 
-    urls.forEach(url => {
+    // Load a handful at a time, at low priority, instead of firing all
+    // ~100 requests at once. Browsers only allow a small number of
+    // simultaneous connections per server (often just 6) - flooding that
+    // pool with every speculative preload up front can leave an image
+    // that's actually needed right now (a card just drawn into the
+    // market) stuck queued behind dozens of others, even though its file
+    // is no bigger than any other card's. Keeping preload concurrency low
+    // and marking it as low-priority leaves room for real, immediate
+    // requests to jump ahead.
+    const CONCURRENCY = 4;
+    let nextIndex = 0;
+
+    function loadNext() {
+        if (nextIndex >= urls.length) return;
+        const url = urls[nextIndex++];
         const img = new Image();
+        if ('fetchPriority' in img) img.fetchPriority = 'low';
+        img.onload = loadNext;
+        img.onerror = loadNext;
         img.src = url;
-    });
+    }
+
+    for (let i = 0; i < CONCURRENCY; i++) loadNext();
 }
 
 if ('requestIdleCallback' in window) {
@@ -421,7 +453,10 @@ function renderNobles() {
 function renderReservedCards() {
     const container = document.getElementById('reserved-cards-container');
     container.innerHTML = '';
-    const player = getCurrentPlayer();
+    // Always show OUR OWN reserved cards, regardless of whose turn it
+    // currently is - reserved cards are private, so nobody else's screen
+    // should ever reveal them.
+    const player = getMyPlayer();
 
     if (player.reservedCards.length === 0) {
         container.innerHTML = '<span style="font-size: 10px; color: #bdc3c7;">None</span>';
@@ -521,7 +556,9 @@ function renderAllPlayersStatus() {
 }
 
 function renderPurchasedCardStacks() {
-    const player = getCurrentPlayer();
+    // Always show OUR OWN purchased cards, not whoever's turn it happens
+    // to be - each client should only ever be looking at their own board.
+    const player = getMyPlayer();
     const container = document.getElementById('purchased-stacks-container');
     document.getElementById('purchased-header').innerText = `Purchased Cards Inventory (${player.playerName})`;
     container.innerHTML = '';
@@ -791,7 +828,7 @@ function tryClaimRing() {
     gameState.ringActivatorId = player.id;
     updateRingArtState();
 
-    notify(`${player.playerName} has claimed The Ring! A final round begins — play continues until it comes back around to ${player.playerName}'s turn. Whoever has the most Victory Points when the final round ends wins (ties broken by whoever holds the most Lorien Leaves)!`, "🔥 The Ring Has Been Claimed!", "success");
+    announceToAll(`${player.playerName} has claimed The Ring! A final round begins — play continues until it comes back around to ${player.playerName}'s turn. Whoever has the most Victory Points when the final round ends wins (ties broken by whoever holds the most Lorien Leaves)!`, "🔥 The Ring Has Been Claimed!", "success");
 
     gameState.actionTakenThisTurn = true;
     syncAndRefresh();
@@ -849,7 +886,7 @@ function declareGameWinner() {
     const verb = winners.length > 1 ? 'win' : 'wins';
     const pointsLabel = winners.length > 1 ? `${maxPoints} Victory Points each` : `${maxPoints} Victory Points`;
 
-    notify(`The final round is complete! ${names} ${verb} the game with ${pointsLabel}${tieNote}!`, "🏆 Game Over!", "success");
+    announceToAll(`The final round is complete! ${names} ${verb} the game with ${pointsLabel}${tieNote}!`, "🏆 Game Over!", "success");
 }
 
 // Visually marks the Ring once it has been claimed (dims it during the
@@ -894,14 +931,14 @@ function checkLorienLeaf(activePlayer) {
     if (lorienHolderId === null) {
         lorienHolderId = newLeader.id;
         newLeader.victoryPoints += 3;
-        notify(`${newLeader.playerName} reached the most leaves (or broke the tie), claimed the Lorien Leaf, and gained 3 Victory Points!`, "Lorien Leaf Claimed", "success");
+        announceToAll(`${newLeader.playerName} reached the most leaves (or broke the tie), claimed the Lorien Leaf, and gained 3 Victory Points!`, "Lorien Leaf Claimed", "success");
     } else if (lorienHolderId !== newLeader.id) {
         let currentHolder = players.find(p => p.id === lorienHolderId);
         if (currentHolder) currentHolder.victoryPoints -= 3;
         
         lorienHolderId = newLeader.id;
         newLeader.victoryPoints += 3;
-        notify(`${newLeader.playerName} took control of the Lorien Leaf and its 3 Victory Points!`, "Lorien Leaf Claimed", "success");
+        announceToAll(`${newLeader.playerName} took control of the Lorien Leaf and its 3 Victory Points!`, "Lorien Leaf Claimed", "success");
     }
 }
 
@@ -924,7 +961,7 @@ function checkNobles(player) {
             // Leave the slot in place (as null) instead of splicing it out,
             // so the other destination cards don't shift over.
             gameState.activeDestinations[i] = null;
-            notify(`${player.playerName} automatically met requirements for a Destination card, gained 3 Victory Points, and claimed it!`, "Destination Reached", "success");
+            announceToAll(`${player.playerName} automatically met requirements for a Destination card, gained 3 Victory Points, and claimed it!`, "Destination Reached", "success");
             renderNobles();
             break;
         }
@@ -1069,10 +1106,11 @@ function startHostingGame(count) {
 // taken by someone else on the (shared, public) PeerJS broker, we just
 // generate a new one and try again a few times.
 function attemptHostPeer(count, attemptsLeft = 5) {
-    const roomCode = generateRoomCode();
-    peer = new Peer(roomCode);
+    const attemptedCode = generateRoomCode();
+    peer = new Peer(attemptedCode);
 
     peer.on('open', async (id) => {
+        roomCode = id;
         // Set up players[] BEFORE showing the room code, so a guest who
         // connects the instant they get the code (before we've dismissed
         // this popup) always finds a valid player slot waiting for them.
@@ -1132,6 +1170,7 @@ async function promptJoinGame() {
         notify("That doesn't look like a valid room code.", "Invalid Code", "warning");
         return;
     }
+    roomCode = code;
 
     isHost = false;
     isMultiplayerMode = true;
@@ -1175,6 +1214,13 @@ function handleIncomingData(data, sourceConnection) {
         updateUI();
         renderAllMarkets();
         renderNobles();
+
+        // Show any game-event popups (leaf/destination/ring/winner) that
+        // came bundled with this state update - the player who triggered
+        // them already saw theirs locally, this is for everyone else.
+        if (Array.isArray(data.events)) {
+            data.events.forEach(e => notify(e.message, e.title, e.variant));
+        }
 
         // If this SYNC_STATE arrived at the host, it's a guest reporting
         // the result of a move they just made locally (see broadcastState
@@ -1238,8 +1284,10 @@ function broadcastState() {
         numPlayers: numPlayers,
         activePlayerIndex: activePlayerIndex,
         lorienHolderId: lorienHolderId,
-        players: players
+        players: players,
+        events: pendingBroadcastEvents
     };
+    pendingBroadcastEvents = [];
 
     if (isHost) {
         hostBroadcastToAll(payload);
@@ -1266,6 +1314,17 @@ function syncAndRefresh() {
 function togglePauseMenu() {
     const pauseMenu = document.getElementById('pause-menu');
     const isVisible = pauseMenu.style.display === 'flex';
+
+    const codeEl = document.getElementById('pause-room-code');
+    if (codeEl) {
+        if (!isVisible && isMultiplayerMode && roomCode) {
+            codeEl.textContent = `Room Code: ${roomCode}`;
+            codeEl.style.display = 'block';
+        } else {
+            codeEl.style.display = 'none';
+        }
+    }
+
     pauseMenu.style.display = isVisible ? 'none' : 'flex';
 }
 
@@ -1288,6 +1347,7 @@ async function returnToMainMenu() {
         isMultiplayerMode = false;
         isHost = false;
         myPlayerId = 1;
+        roomCode = null;
     }
 }
 
