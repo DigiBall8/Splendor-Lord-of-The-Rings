@@ -5,11 +5,69 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Splendour Web Edition</title>
     <link rel="stylesheet" href="style.css">
+    <!-- PeerJS Library for Free P2P Multiplayer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 </head>
 <body>
 
-    <div id="game-container">
-        <h1>Splendor Lord of The Rings</h1>
+    <!-- Main Menu Overlay -->
+    <div id="main-menu" class="menu-overlay">
+        <div class="menu-box">
+            <h1>Splendor Lord of The Rings</h1>
+            <div class="menu-buttons">
+                <button onclick="openPlayerSelection()">Single Player (Local)</button>
+                <button onclick="openPlayerSelection(true)">Host Multiplayer</button>
+                <button onclick="promptJoinGame()">Join Multiplayer</button>
+                <button onclick="openSettings()">Settings</button>
+                <button onclick="quitGame()">Quit Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Player Selection Overlay -->
+    <div id="player-select-menu" class="menu-overlay" style="display: none;">
+        <div class="menu-box">
+            <h2 id="select-title">Select Player Count</h2>
+            <p style="color: #bdc3c7; font-size: 13px;">Choose how many players will join the game:</p>
+            <div class="menu-buttons">
+                <button onclick="handlePlayerCountChosen(2)">2 Players</button>
+                <button onclick="handlePlayerCountChosen(3)">3 Players</button>
+                <button onclick="handlePlayerCountChosen(4)">4 Players</button>
+                <button onclick="closePlayerSelection()" style="background-color: #2a475e; margin-top: 10px;">Back to Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Overlay -->
+    <div id="settings-menu" class="menu-overlay" style="display: none;">
+        <div class="menu-box">
+            <h2>Settings</h2>
+            <p style="color: #bdc3c7; font-size: 13px;">Configure your game options here.</p>
+            <div class="menu-buttons">
+                <button onclick="closeSettings()">Back to Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- In-Game Pause / Settings Menu Overlay -->
+    <div id="pause-menu" class="menu-overlay">
+        <div class="menu-box">
+            <h2>Game Paused</h2>
+            <p style="color: #bdc3c7; font-size: 13px;">What would you like to do?</p>
+            <div class="menu-buttons">
+                <button onclick="togglePauseMenu()">Resume Game</button>
+                <button onclick="returnToMainMenu()" style="background-color: #c0392b;">Quit to Main Menu</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-container" style="display: none;">
+        <!-- Header Flex Container -->
+        <div id="game-header">
+            <h1>Splendor Lord of The Rings</h1>
+            <!-- Cogwheel Pause Button -->
+            <button id="cog-btn" onclick="togglePauseMenu()" title="Settings / Menu">⚙️</button>
+        </div>
         
         <!-- Status Bar -->
         <div id="status-bar">
@@ -17,11 +75,6 @@
                 <span id="turn-indicator">Turn: 1</span> | 
                 <span id="player-turn-indicator" style="color: #f1c40f;">Current Player: Player 1</span>
             </div>
-            <div>
-                <span id="score-indicator">VP: 0 / 16</span> |
-                <span id="token-count-indicator">Tokens: 0 / 10</span>
-            </div>
-            <button id="end-turn-btn" onclick="endTurn()">End Turn</button>
         </div>
 
        <!-- Top Row: Ring Art, Destination Cards & Lorien Leaf Art Panel -->
@@ -70,7 +123,7 @@
                 </div>
             </div>
 
-            <!-- Column 2: Card Markets with Custom Draw Piles (Labels Removed) -->
+            <!-- Column 2: Card Markets with Custom Draw Piles -->
             <div class="panel" id="market-panel">
                 <div class="tier-row">
                     <div class="draw-pile" id="draw-pile-3" onclick="drawCard(3)">
@@ -98,62 +151,44 @@
                 <div id="all-players-status-container"></div>
 
                 <div style="margin-top: 6px; font-size: 11px; border-top: 1px solid #4e6d8c; padding-top: 4px;">
-                    <strong>Active Player Tokens:</strong>
-                    <div id="player-token-grid" style="margin-top: 4px;">
-                        <div class="inv-token-item" onclick="returnToken('emerald')">
-                            <img src="tokens/emerald.png" alt="Emerald">
-                            <span class="token-badge" id="p-emerald">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('diamond')">
-                            <img src="tokens/diamond.png" alt="Diamond">
-                            <span class="token-badge" id="p-diamond">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('sapphire')">
-                            <img src="tokens/sapphire.png" alt="Sapphire">
-                            <span class="token-badge" id="p-sapphire">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('ruby')">
-                            <img src="tokens/ruby.png" alt="Ruby">
-                            <span class="token-badge" id="p-ruby">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('gold')">
-                            <img src="tokens/gold.png" alt="Gold">
-                            <span class="token-badge" id="p-gold">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('onyx')">
-                            <img src="tokens/onyx.png" alt="Onyx">
-                            <span class="token-badge" id="p-onyx-token">0</span>
-                        </div>
-                        <div class="inv-token-item" onclick="returnToken('joker')">
-                            <img src="tokens/joker.png" alt="Joker">
-                            <span class="token-badge" id="p-joker">0</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="player-bonuses" style="margin-top: 6px; font-size: 11px; border-top: 1px solid #4e6d8c; padding-top: 4px;">
-                    <strong>Discounts:</strong> 
-                    Em:<span id="b-emerald">0</span> Di:<span id="b-diamond">0</span> Sa:<span id="b-sapphire">0</span> Ru:<span id="b-ruby">0</span> Go:<span id="b-gold">0</span>
-                </div>
-
-                <div style="margin-top: 4px; font-size: 11px; color: #2ecc71;">
-                    <strong>Leaves:</strong> <span id="p-leaves">0</span> <span id="p-has-lorien" style="color: #f1c40f; display:none;">(👑 Leaf Holder)</span>
-                </div>
-
-<div style="margin-top: 6px; font-size: 11px; border-top: 1px solid #4e6d8c; padding-top: 4px;">
                     <strong>Reserved Cards (Max 3):</strong>
                     <div id="reserved-cards-container" class="card-market" style="margin-top: 3px;"></div>
                 </div>
+
+                <button id="end-turn-btn" onclick="endTurn()">End Turn</button>
             </div>
 
         </div>
         
-        <!-- Purchased Cards Staggered Stack Panel (Bottom) -->
+        <!-- Purchased Cards Horizontal Staggered Panel (Bottom) -->
         <div class="panel" style="margin-top: 10px;">
             <h3 id="purchased-header">Purchased Cards Inventory (Player 1)</h3>
             <div id="purchased-stacks-container">
                 <span style="font-size: 11px; color: #bdc3c7;">None</span>
             </div>
+        </div>
+
+        <!-- In-Game Multiplayer Chat Box -->
+        <div id="chat-container">
+            <div id="chat-messages">
+                <div class="chat-msg" style="color: #66c0f4; font-style: italic;">System: Press Enter to chat with players.</div>
+            </div>
+            <input type="text" id="chat-input" placeholder="Type a message and press Enter..." autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Custom Popup Modal (replaces browser alert/confirm/prompt) -->
+    <div id="custom-modal" class="menu-overlay" style="display: none;">
+        <div class="menu-box modal-box" id="custom-modal-box">
+            <div id="custom-modal-icon">ℹ️</div>
+            <h2 id="custom-modal-title">Notice</h2>
+            <p id="custom-modal-message"></p>
+            <div id="custom-modal-code-wrap" style="display: none;">
+                <div id="custom-modal-code"></div>
+                <button type="button" id="custom-modal-copy-btn">Copy Code</button>
+            </div>
+            <input type="text" id="custom-modal-input" style="display: none;" autocomplete="off">
+            <div class="menu-buttons" id="custom-modal-buttons"></div>
         </div>
     </div>
 
