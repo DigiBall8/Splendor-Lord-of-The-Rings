@@ -1073,10 +1073,13 @@ function attemptHostPeer(count, attemptsLeft = 5) {
     peer = new Peer(roomCode);
 
     peer.on('open', async (id) => {
-        await showModal({ title: "Room Hosted!", message: "Share this 6-digit code with your friends so they can join:", type: "roomcode", code: id, variant: "success" });
+        // Set up players[] BEFORE showing the room code, so a guest who
+        // connects the instant they get the code (before we've dismissed
+        // this popup) always finds a valid player slot waiting for them.
         let hostNames = [localPlayerName];
         for(let i=2; i<=count; i++) hostNames.push(`Player ${i}`);
         initGame(count, hostNames);
+        await showModal({ title: "Room Hosted!", message: "Share this 6-digit code with your friends so they can join:", type: "roomcode", code: id, variant: "success" });
     });
 
     peer.on('connection', (connection) => {
@@ -1172,6 +1175,14 @@ function handleIncomingData(data, sourceConnection) {
         updateUI();
         renderAllMarkets();
         renderNobles();
+
+        // If this SYNC_STATE arrived at the host, it's a guest reporting
+        // the result of a move they just made locally (see broadcastState
+        // below) - adopt it as authoritative and relay it out to every
+        // other connected guest so their screens catch up too.
+        if (isHost) {
+            hostBroadcastToAll(data, sourceConnection);
+        }
     } else if (data.type === 'ASSIGN_PLAYER') {
         // Only relevant to a guest: this is how we learn which player
         // we're actually allowed to act as.
@@ -1219,15 +1230,25 @@ function hostBroadcastToAll(data, excludeConnection) {
 }
 
 function broadcastState() {
-    if (isMultiplayerMode && isHost) {
-        hostBroadcastToAll({
-            type: 'SYNC_STATE',
-            gameState: gameState,
-            numPlayers: numPlayers,
-            activePlayerIndex: activePlayerIndex,
-            lorienHolderId: lorienHolderId,
-            players: players
-        });
+    if (!isMultiplayerMode) return;
+
+    const payload = {
+        type: 'SYNC_STATE',
+        gameState: gameState,
+        numPlayers: numPlayers,
+        activePlayerIndex: activePlayerIndex,
+        lorienHolderId: lorienHolderId,
+        players: players
+    };
+
+    if (isHost) {
+        hostBroadcastToAll(payload);
+    } else if (conn && conn.open) {
+        // A guest can't broadcast directly to anyone else - send our
+        // updated state to the host instead. The host adopts it as
+        // authoritative and relays it to every other guest (and refreshes
+        // its own screen) in the SYNC_STATE handler above.
+        conn.send(payload);
     }
 }
 
