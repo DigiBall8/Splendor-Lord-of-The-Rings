@@ -450,7 +450,7 @@ function renderAllPlayersStatus() {
         playerDiv.style.marginBottom = '3px';
         playerDiv.style.borderRadius = '3px';
         playerDiv.style.background = isCurrent ? 'rgba(26, 188, 156, 0.2)' : 'rgba(0,0,0,0.15)';
-        playerDiv.style.border = isCurrent ? '1px solid #1abc9c' : '1px solid transparent';
+        playerDiv.style.border = isCurrent ? '1px solid #c5a059' : '1px solid transparent';
 
         let totalTokens = Object.values(p.gems).reduce((a, b) => a + b, 0);
 
@@ -481,7 +481,7 @@ function renderAllPlayersStatus() {
         let leafHtml = `<span>${p.leaves}</span>`;
 
         playerDiv.innerHTML = `
-            <div style="font-weight: bold; color: ${isCurrent ? '#1abc9c' : '#ecf0f1'}; margin-bottom: 2px;">
+            <div style="font-weight: bold; color: ${isCurrent ? '#c5a059' : '#ecf0f1'}; margin-bottom: 2px;">
                 ${escapeHtml(p.playerName)} ${isCurrent ? '⭐ (Active)' : ''} — VP: ${p.victoryPoints} | Tokens: ${totalTokens}/10
             </div>
             <div style="color: #bdc3c7; margin-top: 1px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
