@@ -1,8 +1,4 @@
-// ============================
-// CUSTOM POPUP MODAL SYSTEM
-// (replaces native alert/confirm/prompt)
-// ============================
-function showModal({ title = 'Notice', message = '', type = 'alert', variant = 'info', defaultValue = '', code = null, okText = 'OK', cancelText = 'Cancel', confirmText = 'Yes', denyText = 'No' } = {}) {
+function showModal({ title = 'Notice', message = '', type = 'alert', variant = 'info', defaultValue = '', code = null, options = [], okText = 'OK', cancelText = 'Cancel', confirmText = 'Yes', denyText = 'No', maxLength = null } = {}) {
     return new Promise((resolve) => {
         const overlay = document.getElementById('custom-modal');
         const box = document.getElementById('custom-modal-box');
@@ -20,6 +16,7 @@ function showModal({ title = 'Notice', message = '', type = 'alert', variant = '
         titleEl.textContent = title;
         msgEl.textContent = message;
         buttonsEl.innerHTML = '';
+        buttonsEl.classList.toggle('modal-buttons-stacked', type === 'choice');
         inputEl.style.display = 'none';
         inputEl.value = '';
         codeWrap.style.display = 'none';
@@ -56,6 +53,11 @@ function showModal({ title = 'Notice', message = '', type = 'alert', variant = '
         } else if (type === 'prompt') {
             inputEl.style.display = 'block';
             inputEl.value = defaultValue || '';
+            if (maxLength) {
+                inputEl.setAttribute('maxlength', maxLength);
+            } else {
+                inputEl.removeAttribute('maxlength');
+            }
             inputEl.onkeydown = (e) => {
                 if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); close(inputEl.value.trim()); }
             };
@@ -77,6 +79,8 @@ function showModal({ title = 'Notice', message = '', type = 'alert', variant = '
                 }
             };
             addButton("Let's Play", () => close(true));
+        } else if (type === 'choice') {
+            options.forEach((label, idx) => addButton(label, () => close(idx)));
         } else {
             addButton(okText, () => close(true));
         }
@@ -92,10 +96,6 @@ function notify(message, title = 'Notice', variant = 'info') {
     showModal({ title, message, type: 'alert', variant });
 }
 
-// Like notify(), but for game events everyone should see (claiming the
-// Lorien Leaf, a Destination card, The Ring, or the game being won) -
-// shows the popup locally right away AND queues it to go out with the
-// next state sync so every other connected player sees it too.
 function announceToAll(message, title = 'Notice', variant = 'info') {
     notify(message, title, variant);
     if (isMultiplayerMode) {
@@ -283,36 +283,29 @@ gameState.marketTier1 = [gameState.decks[1].pop(), gameState.decks[1].pop(), gam
 gameState.marketTier2 = [gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop()];
 gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop()];
 
-// On a real hosted deployment (unlike testing from a local file), each
-// card's art is only fetched from the server the moment it's first shown -
-// so buying a card and revealing its replacement used to mean waiting on
-// a live network request right at that moment. We already know every
-// image the game could ever need (all 90 tier cards + the 12 destination
-// cards), so fetch them all into the browser's cache in the background as
-// soon as the game loads. By the time any of them is actually drawn, it's
-// already local and appears instantly. This runs during idle time so it
-// doesn't compete with the images that need to show up immediately.
 function preloadGameImages() {
-    const urls = [];
 
-    Object.keys(CARD_DATABASE).forEach(tier => {
-        Object.keys(CARD_DATABASE[tier]).forEach(num => {
-            urls.push(`Level ${tier} Cards/${num}.jpg`);
-        });
-    });
+    const tierQueues = [1, 2, 3].map(tier => [...gameState.decks[tier]].reverse());
+    const urls = [];
+    let anyLeft = true;
+    while (anyLeft) {
+        anyLeft = false;
+        for (const queue of tierQueues) {
+            if (queue.length) {
+                urls.push(queue.shift().image);
+                anyLeft = true;
+            }
+        }
+    }
 
     gameState.destinationsPool.forEach(d => urls.push(d.image));
 
-    // Load a handful at a time, at low priority, instead of firing all
-    // ~100 requests at once. Browsers only allow a small number of
-    // simultaneous connections per server (often just 6) - flooding that
-    // pool with every speculative preload up front can leave an image
-    // that's actually needed right now (a card just drawn into the
-    // market) stuck queued behind dozens of others, even though its file
-    // is no bigger than any other card's. Keeping preload concurrency low
-    // and marking it as low-priority leaves room for real, immediate
-    // requests to jump ahead.
-    const CONCURRENCY = 4;
+    // Load several at a time, at low priority - low priority means any
+    // request the page actively needs right now always gets to jump
+    // ahead of these regardless of how many are in flight, so this
+    // number is really just about not hogging every connection to the
+    // server at once.
+    const CONCURRENCY = 6;
     let nextIndex = 0;
 
     function loadNext() {
@@ -352,14 +345,17 @@ function getDestinationCount(playerCount) {
     return playerCount <= 2 ? 2 : 3;
 }
 
-function initGame(selectedPlayerCount, customNames = []) {
+function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
     numPlayers = selectedPlayerCount;
-    activePlayerIndex = 0;
+    activePlayerIndex = startingPlayerIndex;
     lorienHolderId = null;
     players = [];
     gameState.ringActive = false;
     gameState.ringActivatorId = null;
     gameState.gameEnded = false;
+    gameState.turnNumber = 1;
+    gameState.actionTakenThisTurn = false;
+    gameState.turnGemsPicked = [];
 
     const chipCount = getStartingChipCount(numPlayers);
     gameState.bank = { emerald: chipCount, diamond: chipCount, sapphire: chipCount, ruby: chipCount, gold: chipCount };
@@ -395,6 +391,32 @@ function renderAllMarkets() {
     renderMarket('tier-2-market', gameState.marketTier2, 2);
     renderMarket('tier-3-market', gameState.marketTier3, 3);
     renderReservedCards();
+    syncReservedCardSize();
+}
+
+// Keeps reserved cards from ever rendering bigger than an actual market
+// card by copying the real, currently-rendered market card width onto
+// a CSS variable the reserved cards' max-width reads (see style.css).
+// Re-measuring on every resize (not just on game-state changes) is what
+// makes it track smoothly as the window is dragged narrower/wider.
+function syncReservedCardSize() {
+    const sampleCard = document.querySelector('#market-panel .card:not([style*="hidden"])');
+    const reservedContainer = document.getElementById('reserved-cards-container');
+    if (!sampleCard || !reservedContainer) return;
+    const width = sampleCard.getBoundingClientRect().width;
+    if (width > 0) {
+        reservedContainer.style.setProperty('--market-card-w', width + 'px');
+    }
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+    const marketPanelResizeObserver = new ResizeObserver(() => syncReservedCardSize());
+    document.addEventListener('DOMContentLoaded', () => {
+        const marketPanel = document.getElementById('market-panel');
+        if (marketPanel) marketPanelResizeObserver.observe(marketPanel);
+    });
+} else {
+    window.addEventListener('resize', syncReservedCardSize);
 }
 
 function renderMarket(elementId, marketArray, tierNumber) {
@@ -480,7 +502,6 @@ function renderAllPlayersStatus() {
     players.forEach((p, idx) => {
         const isCurrent = idx === activePlayerIndex;
         const playerDiv = document.createElement('div');
-        playerDiv.style.fontSize = '10px';
         playerDiv.style.padding = '4px 6px';
         playerDiv.style.marginBottom = '3px';
         playerDiv.style.borderRadius = '3px';
@@ -490,8 +511,8 @@ function renderAllPlayersStatus() {
         let totalTokens = Object.values(p.gems).reduce((a, b) => a + b, 0);
 
         const makeTokenSpan = (file, count, gemKey) => `
-            <span class="clickable-token" data-gem="${gemKey}" style="display:inline-flex; align-items:center; margin-right:4px; ${isCurrent && isMyTurn() ? 'cursor:pointer; text-decoration:underline;' : ''}" title="${isCurrent && isMyTurn() ? 'Click to return 1 ' + gemKey : ''}">
-                <img src="tokens/${file}.png" style="width:12px; height:12px; vertical-align:middle; margin-right:1px; pointer-events:none;" />${count}
+            <span class="clickable-token" data-gem="${gemKey}" style="display:inline-flex; align-items:center; margin-right:0.35em; ${isCurrent && isMyTurn() ? 'cursor:pointer; text-decoration:underline;' : ''}" title="${isCurrent && isMyTurn() ? 'Click to return 1 ' + gemKey : ''}">
+                <img src="tokens/${file}.png" style="vertical-align:middle; margin-right:0.15em; pointer-events:none;" /><span class="stat-num">${count}</span>
             </span>`;
         
         let tokensHtml = `
@@ -504,7 +525,7 @@ function renderAllPlayersStatus() {
             ${makeTokenSpan('joker', p.gems.joker, 'joker')}
         `;
 
-        const tokenIconStatic = (file, count) => `<span style="display:inline-flex; align-items:center; margin-right:4px;"><img src="tokens/${file}.png" style="width:12px; height:12px; vertical-align:middle; margin-right:1px;" />${count}</span>`;
+        const tokenIconStatic = (file, count) => `<span style="display:inline-flex; align-items:center; margin-right:0.35em;"><img src="tokens/${file}.png" style="vertical-align:middle; margin-right:0.15em;" /><span class="stat-num">${count}</span></span>`;
         let bonusesHtml = `
             ${tokenIconStatic('emerald', p.bonuses.emerald)}
             ${tokenIconStatic('diamond', p.bonuses.diamond)}
@@ -513,20 +534,20 @@ function renderAllPlayersStatus() {
             ${tokenIconStatic('gold', p.bonuses.gold)}
         `;
 
-        let leafHtml = `<span>${p.leaves}</span>`;
+        let leafHtml = `<span class="stat-num">${p.leaves}</span>`;
 
-        playerDiv.innerHTML = `
-            <div style="font-weight: bold; color: ${isCurrent ? '#c5a059' : '#ecf0f1'}; margin-bottom: 2px;">
-                ${escapeHtml(p.playerName)} ${isCurrent ? '⭐ (Active)' : ''} — VP: ${p.victoryPoints} | Tokens: ${totalTokens}/10
+       playerDiv.innerHTML = `
+            <div style="font-weight: 600; color: ${isCurrent ? '#c5a059' : '#ecf0f1'}; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(p.playerName)}">
+                ${escapeHtml(p.playerName)} ${isCurrent ? '⭐' : ''} — VP: <span class="stat-num">${p.victoryPoints}</span> | Tokens: <span class="stat-num">${totalTokens}</span>/<span class="stat-num">10</span>
             </div>
-            <div style="color: #bdc3c7; margin-top: 1px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
-                <span>Tokens:</span> ${tokensHtml}
+            <div style="color: #bdc3c7; margin-top: 1px; display:flex; flex-wrap:nowrap; align-items:center; gap:0.15em;">
+                <span style="flex-shrink:0;">Tokens:</span> ${tokensHtml}
             </div>
-            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
-                <span>Discounts:</span> ${bonusesHtml}
+            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:nowrap; align-items:center; gap:0.15em;">
+                <span style="flex-shrink:0;">Discounts:</span> ${bonusesHtml}
             </div>
-            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:wrap; align-items:center; gap:2px;">
-                <span>Lorien Leaf:</span> ${leafHtml} ${p.id === lorienHolderId ? '<span style="color: #f1c40f; font-weight:bold;">(👑 Leaf Holder)</span>' : ''}
+            <div style="color: #bdc3c7; margin-top: 2px; display:flex; flex-wrap:nowrap; align-items:center; gap:0.15em;">
+                <span style="flex-shrink:0;">Lorien Leaf:</span> ${leafHtml} ${p.id === lorienHolderId ? '<span style="color: #f1c40f; font-weight:bold;">(👑 Leaf Holder)</span>' : ''}
             </div>
         `;
 
@@ -560,7 +581,7 @@ function renderPurchasedCardStacks() {
     // to be - each client should only ever be looking at their own board.
     const player = getMyPlayer();
     const container = document.getElementById('purchased-stacks-container');
-    document.getElementById('purchased-header').innerText = `Purchased Cards Inventory (${player.playerName})`;
+    document.getElementById('purchased-header').innerHTML = `Purchased Cards Inventory (${wrapNumbers(escapeHtml(player.playerName))})`;
     container.innerHTML = '';
 
     if (player.purchasedCards.length === 0) {
@@ -584,7 +605,7 @@ function renderPurchasedCardStacks() {
         cardsInGroup.forEach((card, idx) => {
             const cardDiv = document.createElement('div');
             cardDiv.className = 'staggered-card';
-            cardDiv.style.left = `${idx * 25}px`;
+            cardDiv.style.left = `${idx * 28}px`;
             cardDiv.style.zIndex = idx + 1;
             cardDiv.innerHTML = `<img src="${card.image}" alt="Card" style="width:100%; height:100%; object-fit:contain;">`;
             stackCol.appendChild(cardDiv);
@@ -597,9 +618,6 @@ function getTotalPlayerTokens(player) {
     return Object.values(player.gems).reduce((a, b) => a + b, 0);
 }
 
-// In multiplayer, a browser tab is only allowed to act on behalf of the
-// player it was assigned (myPlayerId). In local/hotseat play there's no
-// such restriction - one device passes around between everyone.
 function isMyTurn() {
     if (!isMultiplayerMode) return true;
     return getCurrentPlayer().id === myPlayerId;
@@ -1024,15 +1042,24 @@ function updateUI() {
         }
     });
 
-    document.getElementById('turn-indicator').innerText = `Turn: ${gameState.turnNumber}`;
-    document.getElementById('player-turn-indicator').innerText = `${player.playerName}'s Turn`;
+    document.getElementById('turn-indicator').innerHTML = wrapNumbers(`Turn: ${gameState.turnNumber}`);
+    document.getElementById('player-turn-indicator').innerHTML = `${wrapNumbers(escapeHtml(player.playerName))}'s Turn`;
     document.getElementById('turn-gems-tracker').innerText = gameState.turnGemsPicked.join(', ') || 'None';
 
     updateMyIdentityIndicator();
     updateLorienArtVisibility();
     updateRingArtState();
+    updateEndTurnButtonSize();
     renderPurchasedCardStacks();
     renderAllPlayersStatus();
+}
+
+// With only 2-3 players the status list is shorter, leaving more room
+// in the right-hand panel, so the end-turn button can go bigger there.
+function updateEndTurnButtonSize() {
+    const btn = document.getElementById('end-turn-btn');
+    if (!btn) return;
+    btn.classList.toggle('end-turn-btn-xl', numPlayers <= 3);
 }
 
 // Shows each client which player they actually are and whether it's
@@ -1048,9 +1075,9 @@ function updateMyIdentityIndicator() {
 
     const me = getMyPlayer();
     indicator.style.display = 'block';
-    indicator.innerText = isMyTurn()
-        ? `You are ${me.playerName} — it's your turn!`
-        : `You are ${me.playerName} — waiting for your turn...`;
+    indicator.innerHTML = isMyTurn()
+        ? `You are ${wrapNumbers(escapeHtml(me.playerName))} — it's your turn!`
+        : `You are ${wrapNumbers(escapeHtml(me.playerName))} — waiting for your turn...`;
 }
 
 // --- MULTIPLAYER P2P SYNC HANDLERS ---
@@ -1067,23 +1094,25 @@ function closePlayerSelection() {
 }
 
 async function handlePlayerCountChosen(count) {
-    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 1" });
+    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 1", maxLength: 20 });
     if (enteredName && enteredName.trim() !== "") {
-        localPlayerName = enteredName.trim();
+        localPlayerName = enteredName.trim().slice(0, 20);
     }
 
     document.getElementById('player-select-menu').style.display = 'none';
     document.getElementById('game-container').style.display = 'flex';
+    clearChat();
 
     if (hostingForMultiplayer) {
         startHostingGame(count);
     } else {
         let allNames = [localPlayerName];
         for(let i=2; i<=count; i++) {
-            let pName = await showModal({ title: "Player Name", message: `Enter name for Player ${i}:`, type: "prompt", defaultValue: `Player ${i}` });
-            allNames.push(pName ? pName.trim() : `Player ${i}`);
+            let pName = await showModal({ title: "Player Name", message: `Enter name for Player ${i}:`, type: "prompt", defaultValue: `Player ${i}`, maxLength: 20 });
+            allNames.push(pName ? pName.trim().slice(0, 20) : `Player ${i}`);
         }
-        initGame(count, allNames);
+        let startingIndex = await showModal({ title: "Who Goes First?", message: "Choose which player takes the first turn:", type: "choice", options: allNames });
+        initGame(count, allNames, startingIndex || 0);
     }
 }
 
@@ -1116,7 +1145,9 @@ function attemptHostPeer(count, attemptsLeft = 5) {
         // this popup) always finds a valid player slot waiting for them.
         let hostNames = [localPlayerName];
         for(let i=2; i<=count; i++) hostNames.push(`Player ${i}`);
-        initGame(count, hostNames);
+        let slotLabels = hostNames.map((n, idx) => idx === 0 ? `${n} (You)` : n);
+        let startingIndex = await showModal({ title: "Who Goes First?", message: "Choose which player slot takes the first turn (guest names may still update once they join):", type: "choice", options: slotLabels });
+        initGame(count, hostNames, startingIndex || 0);
         await showModal({ title: "Room Hosted!", message: "Share this 6-digit code with your friends so they can join:", type: "roomcode", code: id, variant: "success" });
     });
 
@@ -1158,9 +1189,9 @@ function attemptHostPeer(count, attemptsLeft = 5) {
 }
 
 async function promptJoinGame() {
-    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 2" });
+    let enteredName = await showModal({ title: "Player Name", message: "Enter your player name:", type: "prompt", defaultValue: "Player 2", maxLength: 20 });
     if (enteredName && enteredName.trim() !== "") {
-        localPlayerName = enteredName.trim();
+        localPlayerName = enteredName.trim().slice(0, 20);
     }
 
     let rawCode = await showModal({ title: "Join Game", message: "Enter the 6-digit room code your host shared with you:", type: "prompt" });
@@ -1183,6 +1214,7 @@ async function promptJoinGame() {
             notify("Successfully connected to the host!", "Connected!", "success");
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('game-container').style.display = 'flex';
+            clearChat();
             // Our player name gets sent once the host tells us which
             // player slot we've been assigned (see ASSIGN_PLAYER below).
         });
@@ -1256,7 +1288,7 @@ function handleIncomingData(data, sourceConnection) {
         if (entry) {
             const targetPlayer = players.find(p => p.id === entry.playerId);
             if (targetPlayer) {
-                targetPlayer.playerName = (data.name && data.name.trim()) ? data.name.trim() : targetPlayer.playerName;
+                targetPlayer.playerName = (data.name && data.name.trim()) ? data.name.trim().slice(0, 20) : targetPlayer.playerName;
                 notify(`${targetPlayer.playerName} joined the game!`, "Player Joined", "success");
                 broadcastState();
                 updateUI();
@@ -1456,8 +1488,26 @@ function appendChatMessage(sender, text) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+// Wipes the chat log back to just the initial system line. Called every
+// time a new game is started (single player, hosting, or joining) so
+// messages from a previous game never linger into the next one - the
+// chat box is a persistent DOM element that otherwise just keeps
+// accumulating messages for as long as the page stays open.
+function clearChat() {
+    const chatMessages = document.getElementById('chat-messages');
+    if (!chatMessages) return;
+    chatMessages.innerHTML = '<div class="chat-msg" style="color: #66c0f4; font-style: italic;">System: Press Enter to chat with players.</div>';
+}
+
 function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Wraps every run of digits in a (already HTML-escaped) string with a
+// span so it renders bigger via the .stat-num CSS class, while
+// surrounding letters/punctuation keep the normal text size.
+function wrapNumbers(str) {
+    return str.replace(/\d+/g, '<span class="stat-num">$&</span>');
 }
 
 function openSettings() {
@@ -1469,6 +1519,15 @@ function closeSettings() {
     document.getElementById('main-menu').style.display = 'flex';
 }
 function quitGame() {
+
     window.close();
-    notify("Thanks for playing! You can now close this tab.", "Goodbye!", "info");
+
+    document.body.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:center; height:100vh; text-align:center; padding:20px; box-sizing:border-box;">
+            <div>
+                <h1 style="margin-bottom:12px;">Thanks for playing!</h1>
+                <p style="font-size:15px; color:#bdc3c7;">You can close this tab now.</p>
+            </div>
+        </div>
+    `;
 }
