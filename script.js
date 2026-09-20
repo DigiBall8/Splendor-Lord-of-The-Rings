@@ -1285,6 +1285,8 @@ function clearJoinConnectTimeout() {
     }
 }
 
+let joinHandshakeConfirmed = false; // guest side: true once the host has actually acknowledged our HELLO
+
 function setupGuestConnection(connection, isReconnectAttempt) {
     connection.on('open', () => {
         clearJoinConnectTimeout();
@@ -1295,7 +1297,14 @@ function setupGuestConnection(connection, isReconnectAttempt) {
             clearChat();
         }
         reconnectNoticeShown = false;
-        connection.send({ type: 'HELLO', rejoinToken: myRejoinToken, rejoinPlayerId: myPlayerId });
+        joinHandshakeConfirmed = false;
+        // Some mobile browsers fire PeerJS's 'open' event slightly before the
+        // underlying data channel can reliably deliver the very first message,
+        // which was silently dropping this HELLO and leaving the host never
+        // knowing a guest had joined. Resend a few times until the host
+        // actually acknowledges (ASSIGN_PLAYER/SYNC_STATE), rather than
+        // trusting a single fire-and-forget send.
+        sendHelloUntilAcked(connection, 5);
     });
 
     connection.on('data', (data) => handleIncomingData(data, connection));
@@ -1317,6 +1326,20 @@ function setupGuestConnection(connection, isReconnectAttempt) {
         }
         scheduleGuestReconnect();
     });
+}
+
+function sendHelloUntilAcked(connection, attemptsLeft) {
+    if (joinHandshakeConfirmed || !connection || !connection.open || !isMultiplayerMode || isHost) return;
+    connection.send({ type: 'HELLO', rejoinToken: myRejoinToken, rejoinPlayerId: myPlayerId });
+    if (attemptsLeft > 0) {
+        setTimeout(() => sendHelloUntilAcked(connection, attemptsLeft - 1), 2000);
+    } else {
+        setTimeout(() => {
+            if (!joinHandshakeConfirmed && isMultiplayerMode && players.length === 0) {
+                notify("Connected to the host, but never heard back. This can happen on some mobile or cellular networks. Try leaving and rejoining.", "No Response From Host", "warning");
+            }
+        }, 2000);
+    }
 }
 
 function attemptGuestReconnect() {
@@ -1358,6 +1381,7 @@ document.addEventListener('visibilitychange', () => {
 
 function handleIncomingData(data, sourceConnection) {
     if (data.type === 'SYNC_STATE') {
+        joinHandshakeConfirmed = true;
         Object.assign(gameState, data.gameState);
         numPlayers = data.numPlayers;
         activePlayerIndex = data.activePlayerIndex;
@@ -1376,12 +1400,14 @@ function handleIncomingData(data, sourceConnection) {
             hostBroadcastToAll(data, sourceConnection);
         }
     } else if (data.type === 'ASSIGN_PLAYER') {
+        joinHandshakeConfirmed = true;
         myPlayerId = data.playerId;
         if (data.token) myRejoinToken = data.token;
         if (conn && conn.open) {
             conn.send({ type: 'UPDATE_PLAYER_NAME', name: localPlayerName });
         }
     } else if (data.type === 'ROOM_FULL') {
+        joinHandshakeConfirmed = true;
         notify("That room is already full.", "Room Full", "warning");
         if (peer) { peer.destroy(); peer = null; }
         isMultiplayerMode = false;
