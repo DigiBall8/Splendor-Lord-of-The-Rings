@@ -310,6 +310,8 @@ gameState.marketTier1 = [gameState.decks[1].pop(), gameState.decks[1].pop(), gam
 gameState.marketTier2 = [gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop()];
 gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop()];
 
+let preloadScheduled = false; // so we only ever kick off the background art preload once per game
+
 function preloadGameImages() {
 
     const tierQueues = [1, 2, 3].map(tier => [...gameState.decks[tier]].reverse());
@@ -327,7 +329,11 @@ function preloadGameImages() {
 
     gameState.destinationsPool.forEach(d => urls.push(d.image));
 
-    const CONCURRENCY = 6;
+    // Kept low - this is a background fetch for cards you haven't drawn yet.
+    // Too high a number here competes with the board's own images for the
+    // browser's limited concurrent-connection pool and can noticeably slow
+    // down what you're actually looking at right now.
+    const CONCURRENCY = 3;
     let nextIndex = 0;
 
     function loadNext() {
@@ -343,10 +349,21 @@ function preloadGameImages() {
     for (let i = 0; i < CONCURRENCY; i++) loadNext();
 }
 
-if ('requestIdleCallback' in window) {
-    requestIdleCallback(preloadGameImages, { timeout: 2000 });
-} else {
-    setTimeout(preloadGameImages, 300);
+// Give the board's own visible images (market, nobles, tokens, draw piles) a
+// clear head start before this background preload starts competing for
+// bandwidth/connections. Call this once the current game's board is on
+// screen, not blindly on page load - starting it that early was racing the
+// very images you need to see right away, which is why they could take a
+// long time to appear even on a fast desktop connection.
+function scheduleImagePreload() {
+    if (preloadScheduled) return;
+    preloadScheduled = true;
+    const start = () => setTimeout(preloadGameImages, 1500);
+    if ('requestIdleCallback' in window) {
+        requestIdleCallback(start, { timeout: 4000 });
+    } else {
+        start();
+    }
 }
 
 function drawCardFromDeck(tierNumber) {
@@ -407,6 +424,7 @@ function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0
     updateUI();
     renderAllMarkets();
     renderNobles();
+    scheduleImagePreload();
 }
 
 function getCurrentPlayer() {
@@ -480,7 +498,7 @@ function renderNobles() {
         const nobleDiv = document.createElement('div');
         nobleDiv.className = 'noble-card';
         if (noble) {
-            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img">`;
+            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img" fetchpriority="high" decoding="async">`;
         } else {
             nobleDiv.style.visibility = 'hidden';
         }
@@ -1391,6 +1409,7 @@ function handleIncomingData(data, sourceConnection) {
         updateUI();
         renderAllMarkets();
         renderNobles();
+        scheduleImagePreload();
 
         if (Array.isArray(data.events)) {
             data.events.forEach(e => notify(e.message, e.title, e.variant));
