@@ -673,12 +673,16 @@ h1 {
         box-sizing: border-box !important;
     }
     #ring-card-container, #lorien-panel, .noble-card {
-        width: 140px !important;
+        width: 100px !important; /* Scaled down slightly to prevent clipping on mobile */
+        max-width: 100% !important;
     }
     #nobles-container {
         flex-wrap: wrap !important;
         justify-content: center !important;
         max-width: 100% !important;
+        transform: scale(0.9);
+        transform-origin: top center;
+        margin-bottom: -10px;
     }
     #main-layout {
         display: flex !important;
@@ -694,7 +698,7 @@ h1 {
         height: min(140px, 36vw) !important;
     }
     #market-panel .card, .draw-pile {
-        width: 140px !important;
+        width: 120px !important;
     }
     .tier-row {
         flex-direction: column !important;
