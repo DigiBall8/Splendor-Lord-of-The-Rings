@@ -121,6 +121,11 @@ let myPlayerId = 1;             // which player THIS browser tab is allowed to a
 let roomCode = null;            // the 6-digit code guests use to join our room (host only)
 let pendingBroadcastEvents = []; // game-event popups (leaf/destination/ring/winner) waiting to go out with the next state sync
 
+let myRejoinToken = null;       // secret the host gave us when we first joined; proves a later reconnect is "us" again
+let hostPeerIdForRejoin = null; // host's room code, kept so we can reconnect without the user re-entering it
+let reconnectTimer = null;      // pending retry timer (guest side), so we don't stack up multiple retry loops
+let reconnectNoticeShown = false; // so we only pop up "reconnecting..." once per outage, not on every retry
+
 const CARD_DATABASE = {
     1: {
         1: { points: 0, gem: 'gold', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 2, gold: 1 } },
@@ -300,11 +305,6 @@ function preloadGameImages() {
 
     gameState.destinationsPool.forEach(d => urls.push(d.image));
 
-    // Load several at a time, at low priority - low priority means any
-    // request the page actively needs right now always gets to jump
-    // ahead of these regardless of how many are in flight, so this
-    // number is really just about not hogging every connection to the
-    // server at once.
     const CONCURRENCY = 6;
     let nextIndex = 0;
 
@@ -357,6 +357,11 @@ function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0
     gameState.actionTakenThisTurn = false;
     gameState.turnGemsPicked = [];
 
+    gameState.decks = { 1: createDeck(1), 2: createDeck(2), 3: createDeck(3) };
+    gameState.marketTier1 = [gameState.decks[1].pop(), gameState.decks[1].pop(), gameState.decks[1].pop(), gameState.decks[1].pop()];
+    gameState.marketTier2 = [gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop()];
+    gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop()];
+
     const chipCount = getStartingChipCount(numPlayers);
     gameState.bank = { emerald: chipCount, diamond: chipCount, sapphire: chipCount, ruby: chipCount, gold: chipCount };
 
@@ -394,11 +399,6 @@ function renderAllMarkets() {
     syncReservedCardSize();
 }
 
-// Keeps reserved cards from ever rendering bigger than an actual market
-// card by copying the real, currently-rendered market card width onto
-// a CSS variable the reserved cards' max-width reads (see style.css).
-// Re-measuring on every resize (not just on game-state changes) is what
-// makes it track smoothly as the window is dragged narrower/wider.
 function syncReservedCardSize() {
     const sampleCard = document.querySelector('#market-panel .card:not([style*="hidden"])');
     const reservedContainer = document.getElementById('reserved-cards-container');
@@ -433,13 +433,10 @@ function renderMarket(elementId, marketArray, tierNumber) {
 
         const cardKey = card ? String(card.id) : '';
         if (cardDiv.dataset.cardId !== cardKey) {
-            // Only touch the DOM (and trigger a fresh image decode) when
-            // this slot's card has actually changed - not on every
-            // unrelated refresh (taking a token, ending a turn, etc.).
             cardDiv.dataset.cardId = cardKey;
             if (card) {
                 cardDiv.style.visibility = 'visible';
-                cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img">`;
+                cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async">`;
             } else {
                 cardDiv.innerHTML = '';
                 cardDiv.style.visibility = 'hidden';
@@ -457,9 +454,6 @@ function renderMarket(elementId, marketArray, tierNumber) {
 function renderNobles() {
     const container = document.getElementById('nobles-container');
     container.innerHTML = '';
-    // Claimed slots are kept as empty placeholders (rather than removed)
-    // so the remaining destination cards - and everything else in the
-    // row - don't shift position.
     gameState.activeDestinations.forEach(noble => {
         const nobleDiv = document.createElement('div');
         nobleDiv.className = 'noble-card';
@@ -475,9 +469,6 @@ function renderNobles() {
 function renderReservedCards() {
     const container = document.getElementById('reserved-cards-container');
     container.innerHTML = '';
-    // Always show OUR OWN reserved cards, regardless of whose turn it
-    // currently is - reserved cards are private, so nobody else's screen
-    // should ever reveal them.
     const player = getMyPlayer();
 
     if (player.reservedCards.length === 0) {
@@ -488,7 +479,7 @@ function renderReservedCards() {
     player.reservedCards.forEach((card, index) => {
         const cardDiv = document.createElement('div');
         cardDiv.className = 'card';
-        cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img">`;
+        cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async">`;
         cardDiv.onclick = () => buyReservedCard(index);
         container.appendChild(cardDiv);
     });
@@ -577,8 +568,6 @@ function renderAllPlayersStatus() {
 }
 
 function renderPurchasedCardStacks() {
-    // Always show OUR OWN purchased cards, not whoever's turn it happens
-    // to be - each client should only ever be looking at their own board.
     const player = getMyPlayer();
     const container = document.getElementById('purchased-stacks-container');
     document.getElementById('purchased-header').innerHTML = `Purchased Cards Inventory (${wrapNumbers(escapeHtml(player.playerName))})`;
@@ -807,10 +796,6 @@ function processCardPurchase(card, tierNumber, removeCardCallback) {
     syncAndRefresh();
 }
 
-// Onyx has no discount equivalent, so it must still be held as an actual
-// token. The other five colors can be satisfied either by holding a token
-// of that color OR by already having a purchased-card discount in it.
-// The Joker is not required at all.
 function meetsRingRequirements(player) {
     const hasEnoughPoints = player.victoryPoints >= 16;
     const hasOnyx = player.gems.onyx >= 1;
@@ -852,10 +837,6 @@ function tryClaimRing() {
     syncAndRefresh();
 }
 
-// If the Ring-holder's eligibility slips away mid-final-round (most likely
-// because the Lorien Leaf changed hands and took 3 Victory Points with it),
-// the final round is called off and play just continues normally until
-// someone claims The Ring again.
 function checkRingActivatorStillEligible() {
     if (!gameState.ringActive || gameState.gameEnded) return;
     const activator = players.find(p => p.id === gameState.ringActivatorId);
@@ -874,8 +855,6 @@ function formatNameList(names) {
     return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-// Called when play makes it all the way back around to whoever activated
-// the final round.
 function declareGameWinner() {
     const maxPoints = Math.max(...players.map(p => p.victoryPoints));
     let winners = players.filter(p => p.victoryPoints === maxPoints);
@@ -889,8 +868,6 @@ function declareGameWinner() {
             winners = leafWinners;
             tieNote = ' after a tiebreaker on Lorien Leaf count';
         } else {
-            // Still tied even after the Lorien Leaf tiebreaker - it's a
-            // shared win between everyone still tied.
             winners = leafWinners;
             tieNote = ' — also tied on Lorien Leaf count, so the win is shared';
         }
@@ -907,8 +884,6 @@ function declareGameWinner() {
     announceToAll(`The final round is complete! ${names} ${verb} the game with ${pointsLabel}${tieNote}!`, "🏆 Game Over!", "success");
 }
 
-// Visually marks the Ring once it has been claimed (dims it during the
-// final round and keeps it dimmed once the game has ended).
 function updateRingArtState() {
     const ringContainer = document.getElementById('ring-card-container');
     if (!ringContainer) return;
@@ -960,9 +935,6 @@ function checkLorienLeaf(activePlayer) {
     }
 }
 
-// Shows the Lorien Leaf art at the top only while the leaf is unclaimed
-// (no one holds it yet, or it just became contested/returned). Hides it
-// as soon as a player claims it, since it now belongs to that player.
 function updateLorienArtVisibility() {
     const panel = document.getElementById('lorien-panel');
     if (!panel) return;
@@ -976,8 +948,6 @@ function checkNobles(player) {
         let qualifies = Object.keys(noble.requirements).every(gem => player.bonuses[gem] >= noble.requirements[gem]);
         if (qualifies) {
             player.victoryPoints += noble.points;
-            // Leave the slot in place (as null) instead of splicing it out,
-            // so the other destination cards don't shift over.
             gameState.activeDestinations[i] = null;
             announceToAll(`${player.playerName} automatically met requirements for a Destination card, gained 3 Victory Points, and claimed it!`, "Destination Reached", "success");
             renderNobles();
@@ -1016,8 +986,6 @@ async function endTurn() {
     players.forEach(p => checkNobles(p));
     checkRingActivatorStillEligible();
 
-    // If it's made it all the way back around to whoever activated the
-    // Ring's final round, the game is over.
     if (gameState.ringActive && getCurrentPlayer().id === gameState.ringActivatorId) {
         declareGameWinner();
     }
@@ -1054,16 +1022,12 @@ function updateUI() {
     renderAllPlayersStatus();
 }
 
-// With only 2-3 players the status list is shorter, leaving more room
-// in the right-hand panel, so the end-turn button can go bigger there.
 function updateEndTurnButtonSize() {
     const btn = document.getElementById('end-turn-btn');
     if (!btn) return;
     btn.classList.toggle('end-turn-btn-xl', numPlayers <= 3);
 }
 
-// Shows each client which player they actually are and whether it's
-// currently their turn - only relevant once in a multiplayer game.
 function updateMyIdentityIndicator() {
     const indicator = document.getElementById('my-identity-indicator');
     if (!indicator) return;
@@ -1131,18 +1095,12 @@ function startHostingGame(count) {
     attemptHostPeer(count);
 }
 
-// Tries to claim a random 6-digit code as our Peer ID. If it's already
-// taken by someone else on the (shared, public) PeerJS broker, we just
-// generate a new one and try again a few times.
 function attemptHostPeer(count, attemptsLeft = 5) {
     const attemptedCode = generateRoomCode();
     peer = new Peer(attemptedCode);
 
     peer.on('open', async (id) => {
         roomCode = id;
-        // Set up players[] BEFORE showing the room code, so a guest who
-        // connects the instant they get the code (before we've dismissed
-        // this popup) always finds a valid player slot waiting for them.
         let hostNames = [localPlayerName];
         for(let i=2; i<=count; i++) hostNames.push(`Player ${i}`);
         let slotLabels = hostNames.map((n, idx) => idx === 0 ? `${n} (You)` : n);
@@ -1152,30 +1110,34 @@ function attemptHostPeer(count, attemptsLeft = 5) {
     });
 
     peer.on('connection', (connection) => {
-        if (nextAssignablePlayerId > count) {
-            connection.on('open', () => {
-                connection.send({ type: 'ROOM_FULL' });
-                connection.close();
-            });
-            notify("Someone tried to join, but the room is already full.", "Room Full", "warning");
-            return;
-        }
+        let handled = false;
 
-        const assignedId = nextAssignablePlayerId++;
-        hostConns.push({ connection, playerId: assignedId });
-
-        connection.on('data', (data) => handleIncomingData(data, connection));
-
-        connection.on('open', () => {
-            // Tell the guest which player slot they now control. They'll
-            // reply with their chosen name once they know who they are.
-            connection.send({ type: 'ASSIGN_PLAYER', playerId: assignedId });
-            broadcastState();
+        connection.on('data', (data) => {
+            if (!handled) {
+                handled = true;
+                if (data && data.type === 'HELLO') {
+                    handleGuestHello(connection, data, count);
+                } else {
+                    // A connection that skips the handshake entirely -
+                    // treat it as a fresh join so it's never just dropped.
+                    assignNewGuest(connection, count);
+                    handleIncomingData(data, connection);
+                }
+                return;
+            }
+            handleIncomingData(data, connection);
         });
 
         connection.on('close', () => {
-            hostConns = hostConns.filter(c => c.connection !== connection);
+            const entry = hostConns.find(c => c.connection === connection);
+            if (entry) entry.connection = null;
         });
+    });
+
+    peer.on('disconnected', () => {
+        if (peer && !peer.destroyed) {
+            setTimeout(() => { if (peer && !peer.destroyed) peer.reconnect(); }, 500);
+        }
     });
 
     peer.on('error', (err) => {
@@ -1185,6 +1147,54 @@ function attemptHostPeer(count, attemptsLeft = 5) {
         } else if (isHost && players.length === 0) {
             notify("Couldn't start hosting a room right now. Please try again.", "Hosting Failed", "warning");
         }
+    });
+}
+
+// Grants a connection a brand new player seat (the normal "someone just
+// joined" path).
+function assignNewGuest(connection, count) {
+    if (nextAssignablePlayerId > count) {
+        if (connection.open) {
+            connection.send({ type: 'ROOM_FULL' });
+            connection.close();
+        }
+        notify("Someone tried to join, but the room is already full.", "Room Full", "warning");
+        return;
+    }
+
+    const assignedId = nextAssignablePlayerId++;
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    hostConns.push({ connection, playerId: assignedId, token });
+
+    connection.send({ type: 'ASSIGN_PLAYER', playerId: assignedId, token });
+    broadcastState();
+}
+
+function handleGuestHello(connection, data, count) {
+    if (data.rejoinToken && data.rejoinPlayerId) {
+        const entry = hostConns.find(c => c.token === data.rejoinToken && c.playerId === data.rejoinPlayerId);
+        if (entry) {
+            entry.connection = connection;
+            connection.send({ type: 'ASSIGN_PLAYER', playerId: entry.playerId, token: entry.token });
+            sendStateSyncTo(connection);
+            const rejoinedPlayer = players.find(p => p.id === entry.playerId);
+            notify(`${rejoinedPlayer ? rejoinedPlayer.playerName : 'A player'} reconnected.`, "Player Reconnected", "success");
+            return;
+        }
+    }
+    assignNewGuest(connection, count);
+}
+
+function sendStateSyncTo(connection) {
+    if (!connection || !connection.open) return;
+    connection.send({
+        type: 'SYNC_STATE',
+        gameState: gameState,
+        numPlayers: numPlayers,
+        activePlayerIndex: activePlayerIndex,
+        lorienHolderId: lorienHolderId,
+        players: players,
+        events: []
     });
 }
 
@@ -1202,6 +1212,7 @@ async function promptJoinGame() {
         return;
     }
     roomCode = code;
+    hostPeerIdForRejoin = code;
 
     isHost = false;
     isMultiplayerMode = true;
@@ -1209,32 +1220,86 @@ async function promptJoinGame() {
 
     peer.on('open', () => {
         conn = peer.connect(code);
+        setupGuestConnection(conn, false);
+    });
 
-        conn.on('open', () => {
+    peer.on('disconnected', () => {
+        if (peer && !peer.destroyed) {
+            setTimeout(() => { if (peer && !peer.destroyed) peer.reconnect(); }, 500);
+        }
+    });
+
+    peer.on('error', () => {
+        if (isMultiplayerMode && players.length > 0) {
+            scheduleGuestReconnect();
+        } else {
+            notify("Couldn't connect to that room code. Double check it and try again.", "Connection Failed", "warning");
+            isMultiplayerMode = false;
+        }
+    });
+}
+
+function setupGuestConnection(connection, isReconnectAttempt) {
+    connection.on('open', () => {
+        if (!isReconnectAttempt) {
             notify("Successfully connected to the host!", "Connected!", "success");
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('game-container').style.display = 'flex';
             clearChat();
-            // Our player name gets sent once the host tells us which
-            // player slot we've been assigned (see ASSIGN_PLAYER below).
-        });
-
-        conn.on('data', (data) => handleIncomingData(data, conn));
-
-        conn.on('close', () => {
-            notify("Disconnected from the host.", "Connection Lost", "warning");
-        });
+        }
+        reconnectNoticeShown = false;
+        connection.send({ type: 'HELLO', rejoinToken: myRejoinToken, rejoinPlayerId: myPlayerId });
     });
 
-    peer.on('error', () => {
-        notify("Couldn't connect to that room code. Double check it and try again.", "Connection Failed", "warning");
-        isMultiplayerMode = false;
+    connection.on('data', (data) => handleIncomingData(data, connection));
+
+    connection.on('close', () => {
+        if (!isMultiplayerMode || isHost) return;
+        if (!reconnectNoticeShown) {
+            reconnectNoticeShown = true;
+            notify("Lost connection to the host - trying to reconnect automatically...", "Reconnecting", "warning");
+        }
+        scheduleGuestReconnect();
     });
 }
 
-// Shared handler for any data arriving over a PeerJS connection - used by
-// the host (once per connected guest) and by a guest (for its one
-// connection to the host).
+function attemptGuestReconnect() {
+    if (!isMultiplayerMode || isHost) return;
+    if (!peer || peer.destroyed || !hostPeerIdForRejoin) return;
+    if (conn && conn.open) return; // already fine, nothing to do
+
+    const doConnect = () => {
+        if (!isMultiplayerMode || isHost) return;
+        conn = peer.connect(hostPeerIdForRejoin);
+        setupGuestConnection(conn, true);
+    };
+
+    if (peer.disconnected) {
+        peer.reconnect();
+        peer.once('open', doConnect);
+    } else {
+        doConnect();
+    }
+}
+
+function scheduleGuestReconnect() {
+    if (!isMultiplayerMode || isHost) return;
+    if (reconnectTimer) return; // a retry is already queued
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        attemptGuestReconnect();
+    }, 1500);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !isMultiplayerMode) return;
+    if (isHost) {
+        if (peer && peer.disconnected) peer.reconnect();
+    } else {
+        attemptGuestReconnect();
+    }
+});
+
 function handleIncomingData(data, sourceConnection) {
     if (data.type === 'SYNC_STATE') {
         Object.assign(gameState, data.gameState);
@@ -1247,24 +1312,16 @@ function handleIncomingData(data, sourceConnection) {
         renderAllMarkets();
         renderNobles();
 
-        // Show any game-event popups (leaf/destination/ring/winner) that
-        // came bundled with this state update - the player who triggered
-        // them already saw theirs locally, this is for everyone else.
         if (Array.isArray(data.events)) {
             data.events.forEach(e => notify(e.message, e.title, e.variant));
         }
 
-        // If this SYNC_STATE arrived at the host, it's a guest reporting
-        // the result of a move they just made locally (see broadcastState
-        // below) - adopt it as authoritative and relay it out to every
-        // other connected guest so their screens catch up too.
         if (isHost) {
             hostBroadcastToAll(data, sourceConnection);
         }
     } else if (data.type === 'ASSIGN_PLAYER') {
-        // Only relevant to a guest: this is how we learn which player
-        // we're actually allowed to act as.
         myPlayerId = data.playerId;
+        if (data.token) myRejoinToken = data.token;
         if (conn && conn.open) {
             conn.send({ type: 'UPDATE_PLAYER_NAME', name: localPlayerName });
         }
@@ -1280,10 +1337,6 @@ function handleIncomingData(data, sourceConnection) {
             hostBroadcastToAll(data, sourceConnection);
         }
     } else if (data.type === 'UPDATE_PLAYER_NAME' && isHost) {
-        // Look up which player slot THIS specific connection was
-        // assigned, so each guest's name always lands on their own
-        // player - never on whichever slot happened to still say
-        // "Player N" (which broke with more than one guest joining).
         const entry = hostConns.find(c => c.connection === sourceConnection);
         if (entry) {
             const targetPlayer = players.find(p => p.id === entry.playerId);
@@ -1297,8 +1350,6 @@ function handleIncomingData(data, sourceConnection) {
     }
 }
 
-// Sends data from the host to every connected guest (optionally skipping
-// one connection, e.g. when relaying a chat message back out).
 function hostBroadcastToAll(data, excludeConnection) {
     hostConns.forEach(c => {
         if (c.connection && c.connection.open && c.connection !== excludeConnection) {
@@ -1324,10 +1375,6 @@ function broadcastState() {
     if (isHost) {
         hostBroadcastToAll(payload);
     } else if (conn && conn.open) {
-        // A guest can't broadcast directly to anyone else - send our
-        // updated state to the host instead. The host adopts it as
-        // authoritative and relays it to every other guest (and refreshes
-        // its own screen) in the SYNC_STATE handler above.
         conn.send(payload);
     }
 }
@@ -1370,13 +1417,22 @@ async function returnToMainMenu() {
     document.getElementById('game-container').style.display = 'none';
     document.getElementById('main-menu').style.display = 'flex';
 
+    isMultiplayerMode = false; // set before clearing the timer/peer so any in-flight reconnect logic bails out immediately
+
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    myRejoinToken = null;
+    hostPeerIdForRejoin = null;
+    reconnectNoticeShown = false;
+
     if (peer) {
         peer.destroy();
         peer = null;
         conn = null;
         hostConns = [];
         nextAssignablePlayerId = 2;
-        isMultiplayerMode = false;
         isHost = false;
         myPlayerId = 1;
         roomCode = null;
@@ -1454,9 +1510,6 @@ window.addEventListener('keydown', (event) => {
     }
 });
 
-// Returns the player THIS browser tab is playing as (not necessarily
-// whoever's turn it currently is) - used so chat messages are correctly
-// attributed to whoever actually typed them.
 function getMyPlayer() {
     if (isMultiplayerMode) {
         return players.find(p => p.id === myPlayerId) || getCurrentPlayer();
@@ -1488,11 +1541,6 @@ function appendChatMessage(sender, text) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// Wipes the chat log back to just the initial system line. Called every
-// time a new game is started (single player, hosting, or joining) so
-// messages from a previous game never linger into the next one - the
-// chat box is a persistent DOM element that otherwise just keeps
-// accumulating messages for as long as the page stays open.
 function clearChat() {
     const chatMessages = document.getElementById('chat-messages');
     if (!chatMessages) return;
@@ -1503,9 +1551,6 @@ function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Wraps every run of digits in a (already HTML-escaped) string with a
-// span so it renders bigger via the .stat-num CSS class, while
-// surrounding letters/punctuation keep the normal text size.
 function wrapNumbers(str) {
     return str.replace(/\d+/g, '<span class="stat-num">$&</span>');
 }
