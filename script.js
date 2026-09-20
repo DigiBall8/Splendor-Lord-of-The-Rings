@@ -125,6 +125,28 @@ let myRejoinToken = null;       // secret the host gave us when we first joined;
 let hostPeerIdForRejoin = null; // host's room code, kept so we can reconnect without the user re-entering it
 let reconnectTimer = null;      // pending retry timer (guest side), so we don't stack up multiple retry loops
 let reconnectNoticeShown = false; // so we only pop up "reconnecting..." once per outage, not on every retry
+let joinConnectTimeout = null;  // guest side: fires if a join attempt never opens a data channel
+
+// WebRTC ICE server config for PeerJS. Without this, PeerJS falls back to a
+// single public STUN server, which is often enough when both players are on
+// the same simple network but frequently fails to punch through the NAT on
+// mobile carrier networks / locked-down Wi-Fi - a STUN-only connection can
+// still "open" at the signalling level while the actual peer-to-peer data
+// channel never completes, which is why a join can look like it partially
+// worked (menu closes) but no game data ever arrives. Adding TURN relay
+// servers as a fallback fixes that. (Using Open Relay Project's free public
+// TURN servers - fine for a hobby game, but they're a shared, unmetered
+// public resource with no uptime guarantee.)
+const PEER_ICE_CONFIG = {
+    config: {
+        iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+            { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+            { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
+        ]
+    }
+};
 
 const CARD_DATABASE = {
     1: {
@@ -1097,7 +1119,7 @@ function startHostingGame(count) {
 
 function attemptHostPeer(count, attemptsLeft = 5) {
     const attemptedCode = generateRoomCode();
-    peer = new Peer(attemptedCode);
+    peer = new Peer(attemptedCode, PEER_ICE_CONFIG);
 
     peer.on('open', async (id) => {
         roomCode = id;
@@ -1216,10 +1238,11 @@ async function promptJoinGame() {
 
     isHost = false;
     isMultiplayerMode = true;
-    peer = new Peer();
+    peer = new Peer(PEER_ICE_CONFIG);
 
     peer.on('open', () => {
         conn = peer.connect(code);
+        armJoinConnectTimeout();
         setupGuestConnection(conn, false);
     });
 
@@ -1233,14 +1256,38 @@ async function promptJoinGame() {
         if (isMultiplayerMode && players.length > 0) {
             scheduleGuestReconnect();
         } else {
+            clearJoinConnectTimeout();
             notify("Couldn't connect to that room code. Double check it and try again.", "Connection Failed", "warning");
             isMultiplayerMode = false;
         }
     });
 }
 
+// Guards against a join that never actually completes - e.g. a WebRTC data
+// channel that stalls on a restrictive network instead of firing an error.
+// Without this, entering a code on such a network just looks like "nothing
+// happens" with no feedback at all.
+function armJoinConnectTimeout() {
+    clearJoinConnectTimeout();
+    joinConnectTimeout = setTimeout(() => {
+        if (isMultiplayerMode && players.length === 0) {
+            isMultiplayerMode = false;
+            if (peer) { peer.destroy(); peer = null; }
+            notify("Couldn't reach the host - the connection timed out. Check the code, make sure the host is still hosting, and try again. If this keeps happening, it may be your network (e.g. some mobile/cellular or public Wi-Fi networks block this kind of connection).", "Connection Timed Out", "warning");
+        }
+    }, 15000);
+}
+
+function clearJoinConnectTimeout() {
+    if (joinConnectTimeout) {
+        clearTimeout(joinConnectTimeout);
+        joinConnectTimeout = null;
+    }
+}
+
 function setupGuestConnection(connection, isReconnectAttempt) {
     connection.on('open', () => {
+        clearJoinConnectTimeout();
         if (!isReconnectAttempt) {
             notify("Successfully connected to the host!", "Connected!", "success");
             document.getElementById('main-menu').style.display = 'none';
@@ -1252,6 +1299,15 @@ function setupGuestConnection(connection, isReconnectAttempt) {
     });
 
     connection.on('data', (data) => handleIncomingData(data, connection));
+
+    connection.on('error', () => {
+        if (!isReconnectAttempt && isMultiplayerMode && players.length === 0) {
+            clearJoinConnectTimeout();
+            isMultiplayerMode = false;
+            if (peer) { peer.destroy(); peer = null; }
+            notify("Couldn't connect to that room code. Double check it and try again.", "Connection Failed", "warning");
+        }
+    });
 
     connection.on('close', () => {
         if (!isMultiplayerMode || isHost) return;
