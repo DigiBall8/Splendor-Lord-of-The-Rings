@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Splendour Web Edition</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Google Font for the Lord of the Rings-style lettering used everywhere -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- PeerJS Library for Free P2P Multiplayer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 </head>
@@ -30,9 +34,9 @@
             <h2 id="select-title">Select Player Count</h2>
             <p style="color: #bdc3c7; font-size: 13px;">Choose how many players will join the game:</p>
             <div class="menu-buttons">
-                <button onclick="handlePlayerCountChosen(2)">2 Players</button>
-                <button onclick="handlePlayerCountChosen(3)">3 Players</button>
-                <button onclick="handlePlayerCountChosen(4)">4 Players</button>
+                <button onclick="handlePlayerCountChosen(2)"><span class="stat-num">2</span> Players</button>
+                <button onclick="handlePlayerCountChosen(3)"><span class="stat-num">3</span> Players</button>
+                <button onclick="handlePlayerCountChosen(4)"><span class="stat-num">4</span> Players</button>
                 <button onclick="closePlayerSelection()" style="background-color: #2a475e; margin-top: 10px;">Back to Menu</button>
             </div>
         </div>
@@ -120,7 +124,7 @@
                         <span class="token-badge" id="bank-gold">4</span>
                     </div>
                 </div>
-                <div style="margin-top: 10px; font-size: 11px; color: #bdc3c7; text-align: center;">
+                <div style="margin-top: 10px; font-size: clamp(6px, 3.5cqw, 11px); color: #bdc3c7; text-align: center;">
                     Picked this turn: <span id="turn-gems-tracker">None</span>
                 </div>
             </div>
@@ -148,17 +152,17 @@
             </div>
 
             <!-- Column 3: All Players Overview & Active Inventory -->
-            <div class="panel" id="player-area">
-                <h3>All Players Status</h3>
-                <div id="all-players-status-container"></div>
+<div class="panel" id="player-area">
+    <!-- Removed heading: <h3>All Players Status</h3> -->
+    <div id="all-players-status-container"></div>
 
-                <div style="margin-top: 6px; font-size: 11px; border-top: 1px solid #5a4228; padding-top: 4px;">
-                    <strong>Reserved Cards (Max 3):</strong>
-                    <div id="reserved-cards-container" class="card-market" style="margin-top: 3px;"></div>
-                </div>
+    <div style="margin-top: 6px; font-size: 11px; border-top: 1px solid #5a4228; padding-top: 4px;">
+        <strong>Reserved Cards (Max <span class="stat-num">3</span>):</strong>
+        <div id="reserved-cards-container" class="card-market" style="margin-top: 3px;"></div>
+    </div>
 
-                                <button id="end-turn-btn" onclick="endTurn()" aria-label="End Turn"></button>
-            </div>
+    <button id="end-turn-btn" onclick="endTurn()" aria-label="End Turn"></button>
+</div>
 
         </div>
         
