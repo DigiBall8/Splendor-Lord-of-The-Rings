@@ -86,13 +86,13 @@
        <!-- Top Row: Ring Art, Destination Cards & Lorien Leaf Art Panel -->
         <div id="top-extra-row">
             <div id="ring-card-container" onclick="tryClaimRing()">
-                <img src="tokens/ring.png" alt="The Ring" id="ring-art">
+                <img src="tokens/ring.png" alt="The Ring" id="ring-art" fetchpriority="high">
             </div>
             
             <div id="nobles-container"></div>
             
             <div id="lorien-panel">
-                <img src="tokens/lorien leaf.jpg" alt="Lorien Leaf" id="lorien-art">
+                <img src="tokens/lorien leaf.jpg" alt="Lorien Leaf" id="lorien-art" fetchpriority="high">
             </div>
         </div>
 
@@ -104,23 +104,23 @@
                 <h3>Token Bank</h3>
                 <div id="token-grid">
                     <div class="bank-token-item" onclick="takeGemToken('emerald')">
-                        <img src="tokens/emerald.png" alt="Emerald">
+                        <img src="tokens/emerald.png" alt="Emerald" fetchpriority="high">
                         <span class="token-badge" id="bank-emerald">4</span>
                     </div>
                     <div class="bank-token-item" onclick="takeGemToken('diamond')">
-                        <img src="tokens/diamond.png" alt="Diamond">
+                        <img src="tokens/diamond.png" alt="Diamond" fetchpriority="high">
                         <span class="token-badge" id="bank-diamond">4</span>
                     </div>
                     <div class="bank-token-item" onclick="takeGemToken('sapphire')">
-                        <img src="tokens/sapphire.png" alt="Sapphire">
+                        <img src="tokens/sapphire.png" alt="Sapphire" fetchpriority="high">
                         <span class="token-badge" id="bank-sapphire">4</span>
                     </div>
                     <div class="bank-token-item" onclick="takeGemToken('ruby')">
-                        <img src="tokens/ruby.png" alt="Ruby">
+                        <img src="tokens/ruby.png" alt="Ruby" fetchpriority="high">
                         <span class="token-badge" id="bank-ruby">4</span>
                     </div>
                     <div class="bank-token-item" onclick="takeGemToken('gold')">
-                        <img src="tokens/gold.png" alt="Gold">
+                        <img src="tokens/gold.png" alt="Gold" fetchpriority="high">
                         <span class="token-badge" id="bank-gold">4</span>
                     </div>
                 </div>
@@ -133,19 +133,19 @@
             <div class="panel" id="market-panel">
                 <div class="tier-row">
                     <div class="draw-pile" id="draw-pile-3" onclick="drawCard(3)">
-                        <img src="Card UI/level 3 draw.jpg" alt="Tier 3 Deck">
+                        <img src="Card UI/level 3 draw.jpg" alt="Tier 3 Deck" fetchpriority="high">
                     </div>
                     <div class="card-market" id="tier-3-market"></div>
                 </div>
                 <div class="tier-row">
                     <div class="draw-pile" id="draw-pile-2" onclick="drawCard(2)">
-                        <img src="Card UI/level 2 draw.jpg" alt="Tier 2 Deck">
+                        <img src="Card UI/level 2 draw.jpg" alt="Tier 2 Deck" fetchpriority="high">
                     </div>
                     <div class="card-market" id="tier-2-market"></div>
                 </div>
                 <div class="tier-row">
                     <div class="draw-pile" id="draw-pile-1" onclick="drawCard(1)">
-                        <img src="Card UI/level 1 draw.jpg" alt="Tier 1 Deck">
+                        <img src="Card UI/level 1 draw.jpg" alt="Tier 1 Deck" fetchpriority="high">
                     </div>
                     <div class="card-market" id="tier-1-market"></div>
                 </div>
