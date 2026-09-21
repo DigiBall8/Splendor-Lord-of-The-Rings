@@ -332,6 +332,59 @@ body {
     object-fit: cover;
 }
 
+/* Art fades in once decoded instead of popping in after a flash of the
+   browser's default grey placeholder box - the dark .card/.noble-card
+   background shows through underneath while it loads instead. */
+.card-img,
+.destination-img {
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.card-img.loaded,
+.destination-img.loaded {
+    opacity: 1;
+}
+
+/* ============================
+   "YOUR TURN" ANNOUNCEMENT
+   ============================ */
+#turn-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.85);
+    background: linear-gradient(to bottom, #3d3124, #241c14);
+    border: 2px solid #c5a059;
+    border-radius: 8px;
+    padding: 18px 42px;
+    font-family: "Aniron", "Cinzel", "Georgia", serif;
+    font-size: 24px;
+    font-weight: bold;
+    color: #f3e5ab;
+    text-shadow: 0 1px 3px #000;
+    box-shadow: 0 0 30px rgba(197, 160, 89, 0.5), 0 4px 20px rgba(0, 0, 0, 0.7);
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    text-align: center;
+    white-space: nowrap;
+}
+
+#turn-popup.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+@media screen and (max-width: 900px) {
+    #turn-popup {
+        font-size: 16px !important;
+        padding: 12px 22px !important;
+        white-space: normal !important;
+        max-width: 80vw !important;
+    }
+}
+
 /* HORIZONTAL PURCHASED STACKS CONFIGURATION FIXED */
 #purchased-stacks-container {
     display: flex;
