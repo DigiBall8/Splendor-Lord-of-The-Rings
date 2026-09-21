@@ -451,9 +451,11 @@ function getStartingChipCount(playerCount) {
     return 7;
 }
 
-// Number of Destination cards in play - 2 players only draw 2, everyone else draws 3.
+// Number of Destination cards in play - matches player count (2 players draw 2, 3 draw 3, 4 draw 4).
 function getDestinationCount(playerCount) {
-    return playerCount <= 2 ? 2 : 3;
+    if (playerCount <= 2) return 2;
+    if (playerCount === 3) return 3;
+    return 4;
 }
 
 async function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
