@@ -103,6 +103,46 @@ function announceToAll(message, title = 'Notice', variant = 'info') {
     }
 }
 
+// --- "YOUR TURN" ANNOUNCEMENT POPUP ---
+let turnPopupTimeout = null;
+function showTurnPopup(text) {
+    const el = document.getElementById('turn-popup');
+    const textEl = document.getElementById('turn-popup-text');
+    if (!el || !textEl) return;
+
+    textEl.textContent = text;
+    el.classList.remove('show');
+    void el.offsetWidth; // force reflow so the fade replays if triggered again quickly
+    el.classList.add('show');
+
+    if (turnPopupTimeout) clearTimeout(turnPopupTimeout);
+    turnPopupTimeout = setTimeout(() => {
+        el.classList.remove('show');
+    }, 1800);
+}
+
+// Tracks which turn we last announced (playerIndex:turnNumber) so this only
+// fires once per actual turn change, not on every updateUI() re-render.
+let lastAnnouncedTurnKey = null;
+function announceTurnChange() {
+    const player = players[activePlayerIndex];
+    if (!player) return;
+
+    const key = `${activePlayerIndex}:${gameState.turnNumber}`;
+    if (key === lastAnnouncedTurnKey) return;
+    lastAnnouncedTurnKey = key;
+
+    if (isMultiplayerMode) {
+        // Only pop up for the browser tab that actually controls this player -
+        // everyone else can already see whose turn it is in the status bar.
+        if (player.id === myPlayerId) {
+            showTurnPopup("Your Turn!");
+        }
+    } else {
+        showTurnPopup(`${player.playerName}'s Turn`);
+    }
+}
+
 let numPlayers = 4;
 let activePlayerIndex = 0;
 let lorienHolderId = null;
@@ -387,6 +427,7 @@ function getDestinationCount(playerCount) {
 function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
     numPlayers = selectedPlayerCount;
     activePlayerIndex = startingPlayerIndex;
+    lastAnnouncedTurnKey = null; // fresh game - allow the opening turn to be announced again
     lorienHolderId = null;
     players = [];
     gameState.ringActive = false;
@@ -421,6 +462,7 @@ function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0
     }
 
     gameState.activeDestinations = [...gameState.destinationsPool].sort(() => Math.random() - 0.5).slice(0, getDestinationCount(numPlayers));
+    announceTurnChange();
     updateUI();
     renderAllMarkets();
     renderNobles();
@@ -476,7 +518,7 @@ function renderMarket(elementId, marketArray, tierNumber) {
             cardDiv.dataset.cardId = cardKey;
             if (card) {
                 cardDiv.style.visibility = 'visible';
-                cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async">`;
+                cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
             } else {
                 cardDiv.innerHTML = '';
                 cardDiv.style.visibility = 'hidden';
@@ -498,7 +540,7 @@ function renderNobles() {
         const nobleDiv = document.createElement('div');
         nobleDiv.className = 'noble-card';
         if (noble) {
-            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img" fetchpriority="high" decoding="async">`;
+            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
         } else {
             nobleDiv.style.visibility = 'hidden';
         }
@@ -519,7 +561,7 @@ function renderReservedCards() {
     player.reservedCards.forEach((card, index) => {
         const cardDiv = document.createElement('div');
         cardDiv.className = 'card';
-        cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async">`;
+        cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
         cardDiv.onclick = () => buyReservedCard(index);
         container.appendChild(cardDiv);
     });
@@ -1019,6 +1061,7 @@ async function endTurn() {
 
     activePlayerIndex = (activePlayerIndex + 1) % numPlayers;
     if (activePlayerIndex === 0) gameState.turnNumber++;
+    announceTurnChange();
 
     gameState.actionTakenThisTurn = false;
     gameState.turnGemsPicked = [];
@@ -1405,6 +1448,7 @@ function handleIncomingData(data, sourceConnection) {
         activePlayerIndex = data.activePlayerIndex;
         lorienHolderId = data.lorienHolderId;
         players = data.players;
+        announceTurnChange();
 
         updateUI();
         renderAllMarkets();
