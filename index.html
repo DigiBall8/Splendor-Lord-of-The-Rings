@@ -9,8 +9,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- PeerJS Library for Free P2P Multiplayer -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
+    <!-- PeerJS Library for Free P2P Multiplayer (deferred so it doesn't block the
+         parser from reaching the body and kicking off the board art's image requests) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js" defer></script>
 </head>
 <body>
 
@@ -182,6 +183,9 @@
             <input type="text" id="chat-input" placeholder="Type a message and press Enter..." autocomplete="off">
         </div>
     </div>
+
+    <!-- Centered "It's your turn" announcement (non-blocking, fades in/out) -->
+    <div id="turn-popup"><span id="turn-popup-text"></span></div>
 
     <!-- Custom Popup Modal (replaces browser alert/confirm/prompt) -->
     <div id="custom-modal" class="menu-overlay" style="display: none;">
