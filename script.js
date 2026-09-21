@@ -350,83 +350,93 @@ gameState.marketTier1 = [gameState.decks[1].pop(), gameState.decks[1].pop(), gam
 gameState.marketTier2 = [gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop(), gameState.decks[2].pop()];
 gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop()];
 
-let preloadScheduled = false; // so we only ever kick off the background art preload once per game
-let preloadPauseUntil = 0;    // timestamp (ms) until which the background preloader should idle
-
-// Called right before any player action that's about to reveal a new card,
-// noble, etc. on screen. The background preloader can otherwise still be
-// working through the deck backlog from earlier in the game and, without
-// this, keeps competing for bandwidth/connections against the one image
-// that actually needs to appear right now - which is what was showing up
-// as a card taking many seconds to pop in mid/late game. Pausing it for a
-// couple of seconds around every action gives real, on-screen fetches a
-// clear run every time, and the backlog just resumes once things go quiet.
-function deprioritizeBackgroundPreload() {
-    preloadPauseUntil = Date.now() + 2000;
+// --- FULL ART PRELOAD ---
+// Every card/destination/token image path is static and known up front
+// (CARD_DATABASE never changes at runtime), so rather than loading art
+// lazily as it's needed - which is what caused grey boxes/flicker whenever
+// gameplay outran the loading - we just fetch literally everything once,
+// as early as possible (page load), and gate a game's actual start on it
+// being finished. Once loaded this session, it's cached, so a second game
+// (or a multiplayer guest joining later) resolves instantly.
+function buildAllGameArtUrls() {
+    const urls = [];
+    const tierCounts = { 1: 40, 2: 30, 3: 20 };
+    for (const tier of [1, 2, 3]) {
+        for (let n = 1; n <= tierCounts[tier]; n++) urls.push(`Level ${tier} Cards/${n}.jpg`);
+        urls.push(`Card UI/level ${tier} draw.jpg`);
+    }
+    gameState.destinationsPool.forEach(d => urls.push(d.image));
+    ['emerald', 'diamond', 'sapphire', 'ruby', 'gold', 'onyx', 'joker'].forEach(g => urls.push(`tokens/${g}.png`));
+    urls.push('tokens/ring.png', 'tokens/lorien leaf.jpg');
+    return urls;
 }
 
-function preloadGameImages() {
+let assetsLoadedCount = 0;
+let assetsTotalCount = 0;
+const assetProgressListeners = [];
 
-    const tierQueues = [1, 2, 3].map(tier => [...gameState.decks[tier]].reverse());
-    const urls = [];
-    let anyLeft = true;
-    while (anyLeft) {
-        anyLeft = false;
-        for (const queue of tierQueues) {
-            if (queue.length) {
-                urls.push(queue.shift().image);
-                anyLeft = true;
-            }
-        }
-    }
+function reportAssetProgress() {
+    assetProgressListeners.forEach(fn => fn(assetsLoadedCount, assetsTotalCount));
+}
 
-    gameState.destinationsPool.forEach(d => urls.push(d.image));
+// Kicked off immediately - this Promise resolves once every image below
+// has either loaded or failed (a single missing file should never be able
+// to block the game from starting).
+const allGameArtReady = new Promise((resolve) => {
+    const urls = buildAllGameArtUrls();
+    assetsTotalCount = urls.length;
+    if (assetsTotalCount === 0) { resolve(); return; }
 
-    // Kept low - this is a background fetch for cards you haven't drawn yet.
-    // Too high a number here competes with the board's own images for the
-    // browser's limited concurrent-connection pool and can noticeably slow
-    // down what you're actually looking at right now.
-    const CONCURRENCY = 2;
-    let nextIndex = 0;
+    let remaining = assetsTotalCount;
+    urls.forEach(url => {
+        const img = new Image();
+        const settle = () => {
+            assetsLoadedCount++;
+            reportAssetProgress();
+            remaining--;
+            if (remaining <= 0) resolve();
+        };
+        img.onload = settle;
+        img.onerror = settle;
+        img.src = url;
+    });
+});
 
-    function loadNext() {
-        if (nextIndex >= urls.length) return;
-
-        // Back off while something on the actual board just needed to load -
-        // check again shortly rather than immediately grabbing the next slot.
-        const waitMs = preloadPauseUntil - Date.now();
-        if (waitMs > 0) {
-            setTimeout(loadNext, waitMs);
+// Shows the loading overlay only if art genuinely isn't ready yet, and
+// resolves once it is. Safe to call every time a game is about to start -
+// it resolves immediately (no overlay flash) once assets are cached.
+function ensureArtReady() {
+    return new Promise((resolve) => {
+        if (assetsTotalCount > 0 && assetsLoadedCount >= assetsTotalCount) {
+            resolve();
             return;
         }
 
-        const url = urls[nextIndex++];
-        const img = new Image();
-        if ('fetchPriority' in img) img.fetchPriority = 'low';
-        img.onload = loadNext;
-        img.onerror = loadNext;
-        img.src = url;
-    }
+        const overlay = document.getElementById('asset-loading-overlay');
+        const fill = document.getElementById('asset-loading-bar-fill');
+        const countLabel = document.getElementById('asset-loading-count');
 
-    for (let i = 0; i < CONCURRENCY; i++) loadNext();
+        const update = (loaded, total) => {
+            if (fill) fill.style.width = `${total ? Math.round((loaded / total) * 100) : 100}%`;
+            if (countLabel) countLabel.textContent = `${loaded} / ${total}`;
+        };
+        update(assetsLoadedCount, assetsTotalCount);
+        if (overlay) overlay.style.display = 'flex';
+
+        const listener = (loaded, total) => {
+            update(loaded, total);
+            if (total > 0 && loaded >= total) {
+                const idx = assetProgressListeners.indexOf(listener);
+                if (idx !== -1) assetProgressListeners.splice(idx, 1);
+                if (overlay) overlay.style.display = 'none';
+                resolve();
+            }
+        };
+        assetProgressListeners.push(listener);
+    });
 }
 
-// Give the board's own visible images (market, nobles, tokens, draw piles) a
-// clear head start before this background preload starts competing for
-// bandwidth/connections. Call this once the current game's board is on
-// screen, not blindly on page load - starting it that early was racing the
-// very images you need to see right away, which is why they could take a
-// long time to appear even on a fast desktop connection.
-function scheduleImagePreload() {
-    if (preloadScheduled) return;
-    preloadScheduled = true;
-    const start = () => setTimeout(preloadGameImages, 1500);
-    if ('requestIdleCallback' in window) {
-        requestIdleCallback(start, { timeout: 4000 });
-    } else {
-        start();
-    }
-}
+
 
 function drawCardFromDeck(tierNumber) {
     const deck = gameState.decks[tierNumber];
@@ -446,7 +456,7 @@ function getDestinationCount(playerCount) {
     return playerCount <= 2 ? 2 : 3;
 }
 
-function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
+async function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
     numPlayers = selectedPlayerCount;
     activePlayerIndex = startingPlayerIndex;
     lastAnnouncedTurnKey = null; // fresh game - allow the opening turn to be announced again
@@ -484,11 +494,16 @@ function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0
     }
 
     gameState.activeDestinations = [...gameState.destinationsPool].sort(() => Math.random() - 0.5).slice(0, getDestinationCount(numPlayers));
+
+    // Hold the reveal until every card/token image is actually loaded, so the
+    // board never has anything left to pop in later - only shows a brief
+    // loading screen if the art genuinely hasn't finished downloading yet.
+    await ensureArtReady();
+
     announceTurnChange();
     updateUI();
     renderAllMarkets();
     renderNobles();
-    scheduleImagePreload();
 }
 
 function getCurrentPlayer() {
@@ -539,7 +554,6 @@ function renderMarket(elementId, marketArray, tierNumber) {
         if (cardDiv.dataset.cardId !== cardKey) {
             cardDiv.dataset.cardId = cardKey;
             if (card) {
-                deprioritizeBackgroundPreload();
                 cardDiv.style.visibility = 'visible';
                 cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
             } else {
@@ -613,7 +627,6 @@ function renderReservedCards() {
         const cardKey = String(card.id);
         if (cardDiv.dataset.cardId !== cardKey) {
             cardDiv.dataset.cardId = cardKey;
-            deprioritizeBackgroundPreload();
             cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
         }
 
@@ -1508,10 +1521,11 @@ function handleIncomingData(data, sourceConnection) {
         players = data.players;
         announceTurnChange();
 
-        updateUI();
-        renderAllMarkets();
-        renderNobles();
-        scheduleImagePreload();
+        ensureArtReady().then(() => {
+            updateUI();
+            renderAllMarkets();
+            renderNobles();
+        });
 
         if (Array.isArray(data.events)) {
             data.events.forEach(e => notify(e.message, e.title, e.variant));
