@@ -558,22 +558,36 @@ function renderMarket(elementId, marketArray, tierNumber) {
 
 function renderNobles() {
     const container = document.getElementById('nobles-container');
-    container.innerHTML = '';
-    gameState.activeDestinations.forEach(noble => {
-        const nobleDiv = document.createElement('div');
-        nobleDiv.className = 'noble-card';
-        if (noble) {
-            nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
-        } else {
-            nobleDiv.style.visibility = 'hidden';
+    const existingDivs = Array.from(container.children);
+
+    gameState.activeDestinations.forEach((noble, index) => {
+        let nobleDiv = existingDivs[index];
+        if (!nobleDiv) {
+            nobleDiv = document.createElement('div');
+            nobleDiv.className = 'noble-card';
+            container.appendChild(nobleDiv);
         }
-        container.appendChild(nobleDiv);
+
+        const nobleKey = noble ? String(noble.id) : '';
+        if (nobleDiv.dataset.nobleId !== nobleKey) {
+            nobleDiv.dataset.nobleId = nobleKey;
+            if (noble) {
+                nobleDiv.style.visibility = 'visible';
+                nobleDiv.innerHTML = `<img src="${noble.image}" alt="Destination Card" class="destination-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
+            } else {
+                nobleDiv.innerHTML = '';
+                nobleDiv.style.visibility = 'hidden';
+            }
+        }
     });
+
+    for (let i = gameState.activeDestinations.length; i < existingDivs.length; i++) {
+        existingDivs[i].remove();
+    }
 }
 
 function renderReservedCards() {
     const container = document.getElementById('reserved-cards-container');
-    container.innerHTML = '';
     const player = getMyPlayer();
 
     if (player.reservedCards.length === 0) {
@@ -581,14 +595,34 @@ function renderReservedCards() {
         return;
     }
 
+    // If we're coming from the "None" placeholder, clear it before reusing children below.
+    if (!container.firstElementChild || !container.firstElementChild.classList.contains('card')) {
+        container.innerHTML = '';
+    }
+
+    const existingDivs = Array.from(container.children);
+
     player.reservedCards.forEach((card, index) => {
-        const cardDiv = document.createElement('div');
-        cardDiv.className = 'card';
-        deprioritizeBackgroundPreload();
-        cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
+        let cardDiv = existingDivs[index];
+        if (!cardDiv) {
+            cardDiv = document.createElement('div');
+            cardDiv.className = 'card';
+            container.appendChild(cardDiv);
+        }
+
+        const cardKey = String(card.id);
+        if (cardDiv.dataset.cardId !== cardKey) {
+            cardDiv.dataset.cardId = cardKey;
+            deprioritizeBackgroundPreload();
+            cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
+        }
+
         cardDiv.onclick = () => buyReservedCard(index);
-        container.appendChild(cardDiv);
     });
+
+    for (let i = player.reservedCards.length; i < existingDivs.length; i++) {
+        existingDivs[i].remove();
+    }
 }
 
 function renderAllPlayersStatus() {
