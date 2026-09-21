@@ -15,6 +15,19 @@
 </head>
 <body>
 
+    <!-- Asset Loading Overlay: shown only if the game/host/join flow reaches
+         the board before every card/token image has finished downloading -->
+    <div id="asset-loading-overlay" class="menu-overlay" style="display: none;">
+        <div class="menu-box">
+            <h2>Loading Art...</h2>
+            <p style="color: #bdc3c7; font-size: 13px;">Downloading card and token art so nothing pops in mid-game.</p>
+            <div id="asset-loading-bar-track">
+                <div id="asset-loading-bar-fill"></div>
+            </div>
+            <p id="asset-loading-count" style="color: #bdc3c7; font-size: 12px; margin-top: 6px;"></p>
+        </div>
+    </div>
+
     <!-- Main Menu Overlay -->
     <div id="main-menu" class="menu-overlay">
         <div class="menu-box">
