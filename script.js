@@ -351,6 +351,19 @@ gameState.marketTier2 = [gameState.decks[2].pop(), gameState.decks[2].pop(), gam
 gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop(), gameState.decks[3].pop()];
 
 let preloadScheduled = false; // so we only ever kick off the background art preload once per game
+let preloadPauseUntil = 0;    // timestamp (ms) until which the background preloader should idle
+
+// Called right before any player action that's about to reveal a new card,
+// noble, etc. on screen. The background preloader can otherwise still be
+// working through the deck backlog from earlier in the game and, without
+// this, keeps competing for bandwidth/connections against the one image
+// that actually needs to appear right now - which is what was showing up
+// as a card taking many seconds to pop in mid/late game. Pausing it for a
+// couple of seconds around every action gives real, on-screen fetches a
+// clear run every time, and the backlog just resumes once things go quiet.
+function deprioritizeBackgroundPreload() {
+    preloadPauseUntil = Date.now() + 2000;
+}
 
 function preloadGameImages() {
 
@@ -373,11 +386,20 @@ function preloadGameImages() {
     // Too high a number here competes with the board's own images for the
     // browser's limited concurrent-connection pool and can noticeably slow
     // down what you're actually looking at right now.
-    const CONCURRENCY = 3;
+    const CONCURRENCY = 2;
     let nextIndex = 0;
 
     function loadNext() {
         if (nextIndex >= urls.length) return;
+
+        // Back off while something on the actual board just needed to load -
+        // check again shortly rather than immediately grabbing the next slot.
+        const waitMs = preloadPauseUntil - Date.now();
+        if (waitMs > 0) {
+            setTimeout(loadNext, waitMs);
+            return;
+        }
+
         const url = urls[nextIndex++];
         const img = new Image();
         if ('fetchPriority' in img) img.fetchPriority = 'low';
@@ -517,6 +539,7 @@ function renderMarket(elementId, marketArray, tierNumber) {
         if (cardDiv.dataset.cardId !== cardKey) {
             cardDiv.dataset.cardId = cardKey;
             if (card) {
+                deprioritizeBackgroundPreload();
                 cardDiv.style.visibility = 'visible';
                 cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
             } else {
@@ -561,6 +584,7 @@ function renderReservedCards() {
     player.reservedCards.forEach((card, index) => {
         const cardDiv = document.createElement('div');
         cardDiv.className = 'card';
+        deprioritizeBackgroundPreload();
         cardDiv.innerHTML = `<img src="${card.image}" alt="Card" class="card-img" fetchpriority="high" decoding="async" onload="this.classList.add('loaded')">`;
         cardDiv.onclick = () => buyReservedCard(index);
         container.appendChild(cardDiv);
