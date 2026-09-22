@@ -246,6 +246,35 @@ body {
     font-family: "Aniron", "Cinzel", "Georgia", serif;
 }
 
+#undo-tokens-btn {
+    margin-top: 8px;
+    width: 100%;
+    padding: clamp(3px, 1.5cqw, 6px) clamp(4px, 3cqw, 10px);
+    font-size: clamp(6px, 3.5cqw, 11px);
+    font-weight: bold;
+    background: linear-gradient(to bottom, #3d3124, #241c14);
+    color: #e3d3b8;
+    border: 1px solid #8c6d46;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: "Aniron", "Cinzel", "Georgia", serif;
+    text-shadow: 0 1px 2px #000;
+    flex-shrink: 0;
+}
+
+#undo-tokens-btn:hover:not(:disabled) {
+    background: linear-gradient(to bottom, #5c4935, #3d3124);
+    color: #f3e5ab;
+    border-color: #c5a059;
+    box-shadow: 0 0 10px rgba(197, 160, 89, 0.4);
+}
+
+#undo-tokens-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
 /* MARKET SECTION */
 .tier-row {
     display: flex;
@@ -661,22 +690,16 @@ h1 {
     width: 100vw;
     height: 100vh;
     background-color: rgba(21, 17, 14, 0.92);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-/* Main menu & player-select background image, with a dark gradient over
-   it so the menu box and text stay easy to read */
-#main-menu,
-#player-select-menu {
     background-image:
         linear-gradient(rgba(21, 17, 14, 0.6), rgba(21, 17, 14, 0.8)),
         url("menu_background.jpg");
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
 }
 
 .menu-box {
@@ -734,6 +757,22 @@ h1 {
     border-color: #c5a059;
     box-shadow: 0 0 10px rgba(197, 160, 89, 0.4);
     transform: translateY(-2px);
+}
+
+.menu-buttons button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.lobby-player-row {
+    padding: 4px 0;
+    border-bottom: 1px solid #3d3124;
+}
+
+.lobby-player-row:last-child {
+    border-bottom: none;
 }
 
 @media screen and (max-width: 900px) {
@@ -988,7 +1027,8 @@ h1 {
     word-break: break-all;
 }
 
-#custom-modal-copy-btn {
+#custom-modal-copy-btn,
+#lobby-copy-code-btn {
     background: linear-gradient(to bottom, #3d3124, #241c14);
     color: #e3d3b8;
     border: 1px solid #8c6d46;
@@ -1002,7 +1042,8 @@ h1 {
     font-family: "Aniron", "Cinzel", "Georgia", serif;
 }
 
-#custom-modal-copy-btn:hover {
+#custom-modal-copy-btn:hover,
+#lobby-copy-code-btn:hover {
     background: linear-gradient(to bottom, #5c4935, #3d3124);
     color: #f3e5ab;
     border-color: #c5a059;
