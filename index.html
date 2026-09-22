@@ -42,6 +42,22 @@
         </div>
     </div>
 
+    <!-- Multiplayer Lobby Overlay: shown to host and guests between room
+         creation and the host actually starting the game -->
+    <div id="lobby-menu" class="menu-overlay" style="display: none;">
+        <div class="menu-box">
+            <h2>Waiting For Players</h2>
+            <p id="lobby-room-code" style="color: #66c0f4; font-size: 13px;"></p>
+            <button id="lobby-copy-code-btn" onclick="copyRoomCode()" style="display: none; margin-bottom: 8px;">Copy Code</button>
+            <div id="lobby-player-list" style="margin: 10px 0; text-align: left; font-size: 13px; color: #e3d3b8;"></div>
+            <p id="lobby-waiting-msg" style="display: none; color: #bdc3c7; font-size: 13px;">Waiting for the host to start the game...</p>
+            <div class="menu-buttons">
+                <button id="lobby-start-btn" onclick="hostStartGame()" style="display: none;" disabled>Start Game</button>
+                <button onclick="returnToMainMenu()" style="background-color: #2a475e;">Back to Main Menu</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Player Selection Overlay -->
     <div id="player-select-menu" class="menu-overlay" style="display: none;">
         <div class="menu-box">
@@ -141,6 +157,7 @@
                 <div style="margin-top: 10px; font-size: clamp(6px, 3.5cqw, 11px); color: #bdc3c7; text-align: center;">
                     Picked this turn: <span id="turn-gems-tracker">None</span>
                 </div>
+                <button id="undo-tokens-btn" onclick="undoLastGemPick()" disabled title="Undo your last token pick (only before buying/reserving a card)">Undo Last Token</button>
             </div>
 
             <!-- Column 2: Card Markets with Custom Draw Piles -->
