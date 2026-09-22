@@ -323,6 +323,7 @@ const gameState = {
     turnGemsPicked: [],
     ringActive: false,
     ringActivatorId: null,
+    ringActivatorIndex: null, // seat position (0-based) the Ring was claimed from, used to equalize final-round turns
     gameEnded: false, 
     bank: { emerald: 4, diamond: 4, sapphire: 4, ruby: 4, gold: 4 },
     decks: { 1: createDeck(1), 2: createDeck(2), 3: createDeck(3) },
@@ -466,6 +467,7 @@ async function initGame(selectedPlayerCount, customNames = [], startingPlayerInd
     players = [];
     gameState.ringActive = false;
     gameState.ringActivatorId = null;
+    gameState.ringActivatorIndex = null;
     gameState.gameEnded = false;
     gameState.turnNumber = 1;
     gameState.actionTakenThisTurn = false;
@@ -984,9 +986,10 @@ function tryClaimRing() {
 
     gameState.ringActive = true;
     gameState.ringActivatorId = player.id;
+    gameState.ringActivatorIndex = activePlayerIndex;
     updateRingArtState();
 
-    announceToAll(`${player.playerName} has claimed The Ring! A final round begins — play continues until it comes back around to ${player.playerName}'s turn. Whoever has the most Victory Points when the final round ends wins (ties broken by whoever holds the most Lorien Leaves)!`, "🔥 The Ring Has Been Claimed!", "success");
+    announceToAll(`${player.playerName} has claimed The Ring! Every player who hasn't yet had a turn this round gets exactly one more turn, then the game ends — so nobody ends up with extra turns. Only players who meet The Ring's requirements are eligible to win, and among them, whoever has the most Victory Points wins (ties broken by whoever holds the most Lorien Leaves)!`, "🔥 The Ring Has Been Claimed!", "success");
 
     gameState.actionTakenThisTurn = true;
     syncAndRefresh();
@@ -999,6 +1002,7 @@ function checkRingActivatorStillEligible() {
         notify(`${activator ? activator.playerName : 'The Ring holder'} no longer meets The Ring's requirements. The final round has been cancelled — the game continues until someone claims The Ring again.`, "Final Round Cancelled", "warning");
         gameState.ringActive = false;
         gameState.ringActivatorId = null;
+        gameState.ringActivatorIndex = null;
         updateRingArtState();
     }
 }
@@ -1011,8 +1015,18 @@ function formatNameList(names) {
 }
 
 function declareGameWinner() {
-    const maxPoints = Math.max(...players.map(p => p.victoryPoints));
-    let winners = players.filter(p => p.victoryPoints === maxPoints);
+    // Only players who currently meet The Ring's requirements are eligible to win.
+    // A player sitting on more Victory Points but who doesn't meet the requirements
+    // is excluded from the comparison entirely.
+    let eligiblePlayers = players.filter(p => meetsRingRequirements(p));
+    if (eligiblePlayers.length === 0) {
+        // Safety net: this shouldn't happen since the activator must stay eligible
+        // for the final round to still be running, but fall back rather than crash.
+        eligiblePlayers = players;
+    }
+
+    const maxPoints = Math.max(...eligiblePlayers.map(p => p.victoryPoints));
+    let winners = eligiblePlayers.filter(p => p.victoryPoints === maxPoints);
     let tieNote = '';
 
     if (winners.length > 1) {
@@ -1029,6 +1043,7 @@ function declareGameWinner() {
     }
 
     gameState.ringActive = false;
+    gameState.ringActivatorIndex = null;
     gameState.gameEnded = true;
     updateRingArtState();
 
@@ -1142,7 +1157,14 @@ async function endTurn() {
     players.forEach(p => checkNobles(p));
     checkRingActivatorStillEligible();
 
-    if (gameState.ringActive && getCurrentPlayer().id === gameState.ringActivatorId) {
+    // Equal-turns rule: everyone who hadn't had a turn yet this round when the
+    // Ring was claimed gets exactly one more turn, then the game ends - nobody
+    // gets an extra turn beyond that. Seats are numbered 0..numPlayers-1 in turn
+    // order; once activePlayerIndex wraps back around to the activator's seat or
+    // to any seat that already went before the activator this round (index <=
+    // ringActivatorIndex), that seat has already had its turn for this round, so
+    // the final round is over instead of letting them play again.
+    if (gameState.ringActive && activePlayerIndex <= gameState.ringActivatorIndex) {
         declareGameWinner();
     }
 
