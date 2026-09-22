@@ -16,7 +16,7 @@ function showModal({ title = 'Notice', message = '', type = 'alert', variant = '
         titleEl.textContent = title;
         msgEl.textContent = message;
         buttonsEl.innerHTML = '';
-        buttonsEl.classList.toggle('modal-buttons-stacked', type === 'choice');
+        buttonsEl.classList.toggle('modal-buttons-stacked', type === 'choice' || type === 'roomcode');
         inputEl.style.display = 'none';
         inputEl.value = '';
         codeWrap.style.display = 'none';
@@ -79,6 +79,8 @@ function showModal({ title = 'Notice', message = '', type = 'alert', variant = '
                 }
             };
             addButton("Let's Play", () => close(true));
+            const backBtn = addButton("Back to Main Menu", () => close('back'));
+            backBtn.style.backgroundColor = '#2a475e';
         } else if (type === 'choice') {
             options.forEach((label, idx) => addButton(label, () => close(idx)));
         } else {
@@ -324,6 +326,7 @@ const gameState = {
     ringActive: false,
     ringActivatorId: null,
     ringActivatorIndex: null, // seat position (0-based) the Ring was claimed from, used to equalize final-round turns
+    gameStarted: true, // false only during a hosted multiplayer lobby, while waiting to pick who goes first
     gameEnded: false, 
     bank: { emerald: 4, diamond: 4, sapphire: 4, ruby: 4, gold: 4 },
     decks: { 1: createDeck(1), 2: createDeck(2), 3: createDeck(3) },
@@ -468,6 +471,7 @@ async function initGame(selectedPlayerCount, customNames = [], startingPlayerInd
     gameState.ringActive = false;
     gameState.ringActivatorId = null;
     gameState.ringActivatorIndex = null;
+    gameState.gameStarted = true;
     gameState.gameEnded = false;
     gameState.turnNumber = 1;
     gameState.actionTakenThisTurn = false;
@@ -504,7 +508,11 @@ async function initGame(selectedPlayerCount, customNames = [], startingPlayerInd
     // loading screen if the art genuinely hasn't finished downloading yet.
     await ensureArtReady();
 
-    announceTurnChange();
+    // Skipped while a hosted room is still sitting in its lobby (gameStarted
+    // gets set to false right after this call, before this await resolves) -
+    // otherwise the host's own turn popup fires the moment the room is
+    // created, long before anyone has actually started playing.
+    if (gameState.gameStarted) announceTurnChange();
     updateUI();
     renderAllMarkets();
     renderNobles();
@@ -854,6 +862,37 @@ function takeGemToken(gemType) {
     syncAndRefresh();
 }
 
+// Undoes only the most recent token pick from the bank. Only usable while the
+// current turn's only action so far has been picking gems - once a card has
+// been bought or reserved (or the turn was already passed), this does nothing,
+// since actionTakenThisTurn is only ever true with an empty turnGemsPicked in
+// that case, which the disabled button state below also reflects.
+function undoLastGemPick() {
+    if (gameState.gameEnded) {
+        notify("The game has already ended.", "Game Over", "info");
+        return;
+    }
+    if (!isMyTurn()) {
+        notifyNotYourTurn();
+        return;
+    }
+    if (gameState.turnGemsPicked.length === 0) {
+        notify("There's no token pick to undo this turn.", "Nothing To Undo", "info");
+        return;
+    }
+
+    const player = getCurrentPlayer();
+    const lastGem = gameState.turnGemsPicked.pop();
+    player.gems[lastGem]--;
+    gameState.bank[lastGem]++;
+
+    if (gameState.turnGemsPicked.length === 0) {
+        gameState.actionTakenThisTurn = false;
+    }
+
+    syncAndRefresh();
+}
+
 function buyCard(tierNumber, index) {
     if (gameState.gameEnded) {
         notify("The game has already ended.", "Game Over", "info");
@@ -1172,6 +1211,15 @@ async function endTurn() {
 }
 
 function updateUI() {
+    const lobby = document.getElementById('lobby-menu');
+    const container = document.getElementById('game-container');
+    if (lobby) lobby.style.display = gameState.gameStarted ? 'none' : 'flex';
+    if (container) container.style.display = gameState.gameStarted ? 'flex' : 'none';
+    if (!gameState.gameStarted) {
+        renderLobby();
+        return;
+    }
+
     const player = getCurrentPlayer();
     for (let gem in gameState.bank) {
         document.getElementById(`bank-${gem}`).innerText = gameState.bank[gem];
@@ -1192,6 +1240,7 @@ function updateUI() {
     document.getElementById('player-turn-indicator').innerHTML = `${wrapNumbers(escapeHtml(player.playerName))}'s Turn`;
     document.getElementById('turn-gems-tracker').innerText = gameState.turnGemsPicked.join(', ') || 'None';
 
+    updateUndoTokenButton();
     updateMyIdentityIndicator();
     updateLorienArtVisibility();
     updateRingArtState();
@@ -1204,6 +1253,15 @@ function updateEndTurnButtonSize() {
     const btn = document.getElementById('end-turn-btn');
     if (!btn) return;
     btn.classList.toggle('end-turn-btn-xl', numPlayers <= 3);
+}
+
+// Only enabled while it's your turn and the only thing you've done so far this
+// turn is pick tokens (never after buying/reserving a card, and never once the
+// turn has passed on).
+function updateUndoTokenButton() {
+    const btn = document.getElementById('undo-tokens-btn');
+    if (!btn) return;
+    btn.disabled = gameState.gameEnded || !isMyTurn() || gameState.turnGemsPicked.length === 0;
 }
 
 function updateMyIdentityIndicator() {
@@ -1220,6 +1278,77 @@ function updateMyIdentityIndicator() {
     indicator.innerHTML = isMyTurn()
         ? `You are ${wrapNumbers(escapeHtml(me.playerName))} — it's your turn!`
         : `You are ${wrapNumbers(escapeHtml(me.playerName))} — waiting for your turn...`;
+}
+
+// Renders the "waiting for players" lobby shown to everyone between a hosted
+// room being created and the host actually starting the game. A seat counts
+// as joined once its name is no longer the default placeholder (the host's
+// own seat, index 0, is always considered joined).
+function renderLobby() {
+    const lobby = document.getElementById('lobby-menu');
+    if (!lobby || gameState.gameStarted) return;
+
+    const listEl = document.getElementById('lobby-player-list');
+    const startBtn = document.getElementById('lobby-start-btn');
+    const waitingMsg = document.getElementById('lobby-waiting-msg');
+    const codeEl = document.getElementById('lobby-room-code');
+    const copyBtn = document.getElementById('lobby-copy-code-btn');
+
+    if (codeEl) codeEl.textContent = roomCode ? `Room Code: ${roomCode}` : '';
+    if (copyBtn) copyBtn.style.display = roomCode ? 'block' : 'none';
+
+    const joinedFlags = players.map((p, idx) => idx === 0 || p.playerName !== `Player ${idx + 1}`);
+    if (listEl) {
+        listEl.innerHTML = players.map((p, idx) => {
+            const joined = joinedFlags[idx];
+            const label = idx === 0 ? `${escapeHtml(p.playerName)} (Host)` : escapeHtml(p.playerName);
+            return `<div class="lobby-player-row">${joined ? '✅' : '⏳'} ${label}</div>`;
+        }).join('');
+    }
+
+    const allJoined = joinedFlags.every(Boolean);
+    if (isHost) {
+        if (startBtn) {
+            startBtn.style.display = 'inline-block';
+            startBtn.disabled = !allJoined;
+        }
+        if (waitingMsg) waitingMsg.style.display = 'none';
+    } else {
+        if (startBtn) startBtn.style.display = 'none';
+        if (waitingMsg) waitingMsg.style.display = 'block';
+    }
+}
+
+// Copies the room code to the clipboard from the lobby's "Copy Code" button.
+function copyRoomCode() {
+    if (!roomCode) return;
+    const btn = document.getElementById('lobby-copy-code-btn');
+    const done = () => {
+        if (!btn) return;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy Code'; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(roomCode).then(done).catch(done);
+    } else {
+        done();
+    }
+}
+
+// Called by the host's "Start Game" button once every seat has joined - this
+// is where who-goes-first is now chosen, using everyone's real names instead
+// of guessing at empty slots before anyone has connected.
+async function hostStartGame() {
+    if (!isHost || gameState.gameStarted) return;
+
+    const joinedNames = players.map(p => p.playerName);
+    const startingIndex = await showModal({ title: "Who Goes First?", message: "Choose which player takes the first turn:", type: "choice", options: joinedNames });
+
+    activePlayerIndex = startingIndex || 0;
+    gameState.gameStarted = true;
+    lastAnnouncedTurnKey = null; // fresh start - allow the opening turn to be announced
+    announceTurnChange();
+    syncAndRefresh();
 }
 
 // --- MULTIPLAYER P2P SYNC HANDLERS ---
@@ -1242,12 +1371,13 @@ async function handlePlayerCountChosen(count) {
     }
 
     document.getElementById('player-select-menu').style.display = 'none';
-    document.getElementById('game-container').style.display = 'flex';
     clearChat();
 
     if (hostingForMultiplayer) {
+        document.getElementById('lobby-menu').style.display = 'flex';
         startHostingGame(count);
     } else {
+        document.getElementById('game-container').style.display = 'flex';
         let allNames = [localPlayerName];
         for(let i=2; i<=count; i++) {
             let pName = await showModal({ title: "Player Name", message: `Enter name for Player ${i}:`, type: "prompt", defaultValue: `Player ${i}`, maxLength: 20 });
@@ -1281,10 +1411,9 @@ function attemptHostPeer(count, attemptsLeft = 5) {
         roomCode = id;
         let hostNames = [localPlayerName];
         for(let i=2; i<=count; i++) hostNames.push(`Player ${i}`);
-        let slotLabels = hostNames.map((n, idx) => idx === 0 ? `${n} (You)` : n);
-        let startingIndex = await showModal({ title: "Who Goes First?", message: "Choose which player slot takes the first turn (guest names may still update once they join):", type: "choice", options: slotLabels });
-        initGame(count, hostNames, startingIndex || 0);
-        await showModal({ title: "Room Hosted!", message: "Share this 6-digit code with your friends so they can join:", type: "roomcode", code: id, variant: "success" });
+        initGame(count, hostNames, 0); // starting player is chosen once everyone has joined, via the lobby's Start Game button
+        gameState.gameStarted = false;
+        renderLobby();
     });
 
     peer.on('connection', (connection) => {
@@ -1324,6 +1453,8 @@ function attemptHostPeer(count, attemptsLeft = 5) {
             attemptHostPeer(count, attemptsLeft - 1);
         } else if (isHost && players.length === 0) {
             notify("Couldn't start hosting a room right now. Please try again.", "Hosting Failed", "warning");
+            document.getElementById('lobby-menu').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
         }
     });
 }
@@ -1449,7 +1580,7 @@ function setupGuestConnection(connection, isReconnectAttempt) {
         if (!isReconnectAttempt) {
             notify("Successfully connected to the host!", "Connected!", "success");
             document.getElementById('main-menu').style.display = 'none';
-            document.getElementById('game-container').style.display = 'flex';
+            document.getElementById('lobby-menu').style.display = 'flex';
             clearChat();
         }
         reconnectNoticeShown = false;
@@ -1571,6 +1702,7 @@ function handleIncomingData(data, sourceConnection) {
         if (peer) { peer.destroy(); peer = null; }
         isMultiplayerMode = false;
         document.getElementById('game-container').style.display = 'none';
+        document.getElementById('lobby-menu').style.display = 'none';
         document.getElementById('main-menu').style.display = 'flex';
     } else if (data.type === 'CHAT_MESSAGE') {
         appendChatMessage(data.sender, data.message);
@@ -1649,13 +1781,17 @@ function togglePauseMenu() {
 }
 
 async function returnToMainMenu() {
-    const confirmed = await showModal({ title: "Quit to Main Menu?", message: "Are you sure you want to quit to the main menu? Any active game progress will be lost.", type: "confirm", variant: "warning" });
+    const inLobby = isMultiplayerMode && !gameState.gameStarted;
+    const confirmed = await showModal(inLobby
+        ? { title: "Leave Lobby?", message: "Are you sure you want to leave and return to the main menu?", type: "confirm", variant: "warning" }
+        : { title: "Quit to Main Menu?", message: "Are you sure you want to quit to the main menu? Any active game progress will be lost.", type: "confirm", variant: "warning" });
     if (!confirmed) {
         return;
     }
 
     document.getElementById('pause-menu').style.display = 'none';
     document.getElementById('game-container').style.display = 'none';
+    document.getElementById('lobby-menu').style.display = 'none';
     document.getElementById('main-menu').style.display = 'flex';
 
     isMultiplayerMode = false; // set before clearing the timer/peer so any in-flight reconnect logic bails out immediately
