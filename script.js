@@ -996,7 +996,7 @@ function meetsRingRequirements(player) {
     const hasEnoughPoints = player.victoryPoints >= 16;
     const hasOnyx = player.gems.onyx >= 1;
     const hasOtherColors = ['emerald', 'diamond', 'sapphire', 'ruby', 'gold']
-        .every(g => (player.gems[g] + player.bonuses[g]) >= 1);
+        .every(g => player.bonuses[g] >= 1);
     return hasEnoughPoints && hasOnyx && hasOtherColors;
 }
 
@@ -1019,7 +1019,7 @@ function tryClaimRing() {
     }
 
     if (!meetsRingRequirements(player)) {
-        notify(`Requirements:\n- Minimum 16 Victory Points (You have ${player.victoryPoints})\n- At least 1 Onyx token\n- At least 1 of each other color (Emerald, Diamond, Sapphire, Ruby, Gold) — from tokens or discounts`, "Cannot Claim The Ring Yet", "warning");
+        notify(`Requirements:\n- Minimum 16 Victory Points (You have ${player.victoryPoints})\n- At least 1 Onyx token\n- At least 1 permanent card discount of each other color (Emerald, Diamond, Sapphire, Ruby, Gold)`, "Cannot Claim The Ring Yet", "warning");
         return;
     }
 
