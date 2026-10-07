@@ -168,6 +168,33 @@ let hostPeerIdForRejoin = null; // host's room code, kept so we can reconnect wi
 let reconnectTimer = null;      // pending retry timer (guest side), so we don't stack up multiple retry loops
 let reconnectNoticeShown = false; // so we only pop up "reconnecting..." once per outage, not on every retry
 let joinConnectTimeout = null;  // guest side: fires if a join attempt never opens a data channel
+let pendingRejoinOnly = false;  // guest side: true when auto-rejoining after a refresh - the host must never hand us a brand new seat
+let pendingClaimPlayerId = null; // guest side: seat we're asking the host to let us take over
+let choosingSeat = false;       // guest side: true while the "which seat is yours?" popup is open
+
+// A guest's seat + secret token are saved in localStorage so a page refresh (or
+// closed tab / browser crash) doesn't lose the seat - on reload we offer to rejoin.
+const REJOIN_STORAGE_KEY = 'splendorRejoinSession';
+const REJOIN_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+function saveRejoinSession() {
+    try {
+        if (!hostPeerIdForRejoin || !myRejoinToken) return;
+        localStorage.setItem(REJOIN_STORAGE_KEY, JSON.stringify({
+            code: hostPeerIdForRejoin, playerId: myPlayerId, token: myRejoinToken,
+            name: localPlayerName, savedAt: Date.now()
+        }));
+    } catch (e) { /* storage unavailable - rejoin-after-refresh just won't be offered */ }
+}
+function loadRejoinSession() {
+    try {
+        const s = JSON.parse(localStorage.getItem(REJOIN_STORAGE_KEY) || 'null');
+        if (s && s.code && s.token && s.playerId && (Date.now() - s.savedAt) < REJOIN_MAX_AGE_MS) return s;
+    } catch (e) {}
+    return null;
+}
+function clearRejoinSession() {
+    try { localStorage.removeItem(REJOIN_STORAGE_KEY); } catch (e) {}
+}
 
 // WebRTC ICE server config for PeerJS. Without this, PeerJS falls back to a
 // single public STUN server, which is often enough when both players are on
@@ -325,6 +352,7 @@ const gameState = {
     turnGemsPicked: [],
     ringActive: false,
     ringActivatorId: null,
+    startingPlayerIndex: 0, // seat that took the first turn of the game; a "round" ends when play returns to this seat
     ringActivatorIndex: null, // seat position (0-based) the Ring was claimed from, used to equalize final-round turns
     gameStarted: true, // false only during a hosted multiplayer lobby, while waiting to pick who goes first
     gameEnded: false, 
@@ -465,6 +493,7 @@ function getDestinationCount(playerCount) {
 async function initGame(selectedPlayerCount, customNames = [], startingPlayerIndex = 0) {
     numPlayers = selectedPlayerCount;
     activePlayerIndex = startingPlayerIndex;
+    gameState.startingPlayerIndex = startingPlayerIndex;
     lastAnnouncedTurnKey = null; // fresh game - allow the opening turn to be announced again
     lorienHolderId = null;
     players = [];
@@ -1187,7 +1216,7 @@ async function endTurn() {
     }
 
     activePlayerIndex = (activePlayerIndex + 1) % numPlayers;
-    if (activePlayerIndex === 0) gameState.turnNumber++;
+    if (activePlayerIndex === gameState.startingPlayerIndex) gameState.turnNumber++;
     announceTurnChange();
 
     gameState.actionTakenThisTurn = false;
@@ -1203,7 +1232,9 @@ async function endTurn() {
     // to any seat that already went before the activator this round (index <=
     // ringActivatorIndex), that seat has already had its turn for this round, so
     // the final round is over instead of letting them play again.
-    if (gameState.ringActive && activePlayerIndex <= gameState.ringActivatorIndex) {
+    // Rounds begin at the starting player's seat, not necessarily seat 0, so the
+    // final round is over once play wraps back around to that seat.
+    if (gameState.ringActive && activePlayerIndex === gameState.startingPlayerIndex) {
         declareGameWinner();
     }
 
@@ -1463,11 +1494,7 @@ function attemptHostPeer(count, attemptsLeft = 5) {
 // joined" path).
 function assignNewGuest(connection, count) {
     if (nextAssignablePlayerId > count) {
-        if (connection.open) {
-            connection.send({ type: 'ROOM_FULL' });
-            connection.close();
-        }
-        notify("Someone tried to join, but the room is already full.", "Room Full", "warning");
+        sendRoomFull(connection);
         return;
     }
 
@@ -1479,17 +1506,67 @@ function assignNewGuest(connection, count) {
     broadcastState();
 }
 
+// Seats whose guest has dropped (no live connection) and can be taken over.
+function getOpenSeats() {
+    return hostConns
+        .filter(c => !c.connection || !c.connection.open)
+        .map(c => {
+            const p = players.find(pl => pl.id === c.playerId);
+            return { playerId: c.playerId, name: p ? p.playerName : `Player ${c.playerId}` };
+        });
+}
+
+function sendRoomFull(connection) {
+    const openSeats = getOpenSeats();
+    if (connection.open) {
+        connection.send({ type: 'ROOM_FULL', openSeats });
+        // Keep the channel open if they can claim a seat; otherwise we're done with them.
+        if (openSeats.length === 0) setTimeout(() => { try { connection.close(); } catch (e) {} }, 500);
+    }
+    if (openSeats.length === 0) {
+        notify("Someone tried to join, but the room is already full.", "Room Full", "warning");
+    }
+}
+
+// Attaches a (new) connection to an existing seat and brings it up to date.
+function seatReconnect(entry, connection) {
+    const oldConnection = entry.connection;
+    entry.connection = connection;
+    if (oldConnection && oldConnection !== connection) {
+        try { oldConnection.close(); } catch (e) {}
+    }
+    connection.send({ type: 'ASSIGN_PLAYER', playerId: entry.playerId, token: entry.token });
+    sendStateSyncTo(connection);
+    const rejoinedPlayer = players.find(p => p.id === entry.playerId);
+    notify(`${rejoinedPlayer ? rejoinedPlayer.playerName : 'A player'} reconnected.`, "Player Reconnected", "success");
+}
+
 function handleGuestHello(connection, data, count) {
+    // 1) Normal rejoin: they still know the secret token for their seat.
     if (data.rejoinToken && data.rejoinPlayerId) {
         const entry = hostConns.find(c => c.token === data.rejoinToken && c.playerId === data.rejoinPlayerId);
         if (entry) {
-            entry.connection = connection;
-            connection.send({ type: 'ASSIGN_PLAYER', playerId: entry.playerId, token: entry.token });
-            sendStateSyncTo(connection);
-            const rejoinedPlayer = players.find(p => p.id === entry.playerId);
-            notify(`${rejoinedPlayer ? rejoinedPlayer.playerName : 'A player'} reconnected.`, "Player Reconnected", "success");
+            seatReconnect(entry, connection);
             return;
         }
+    }
+    // 2) Seat takeover: they lost their token (e.g. cleared storage) and picked a
+    //    disconnected seat from the "Room Full" list. Issue the seat a fresh token.
+    if (data.claimPlayerId) {
+        const entry = hostConns.find(c => c.playerId === data.claimPlayerId && (!c.connection || !c.connection.open));
+        if (entry) {
+            entry.token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+            seatReconnect(entry, connection);
+        } else {
+            sendRoomFull(connection);
+        }
+        return;
+    }
+    // 3) Auto-rejoin after a refresh must never create a new seat.
+    if (data.rejoinOnly) {
+        if (connection.open) connection.send({ type: 'REJOIN_FAILED' });
+        setTimeout(() => { try { connection.close(); } catch (e) {} }, 500);
+        return;
     }
     assignNewGuest(connection, count);
 }
@@ -1520,6 +1597,10 @@ async function promptJoinGame() {
         notify("That doesn't look like a valid room code.", "Invalid Code", "warning");
         return;
     }
+    startGuestJoin(code);
+}
+
+function startGuestJoin(code) {
     roomCode = code;
     hostPeerIdForRejoin = code;
 
@@ -1544,6 +1625,7 @@ async function promptJoinGame() {
             scheduleGuestReconnect();
         } else {
             clearJoinConnectTimeout();
+            if (pendingRejoinOnly) { pendingRejoinOnly = false; clearRejoinSession(); }
             notify("Couldn't connect to that room code. Double check it and try again.", "Connection Failed", "warning");
             isMultiplayerMode = false;
         }
@@ -1559,6 +1641,7 @@ function armJoinConnectTimeout() {
     joinConnectTimeout = setTimeout(() => {
         if (isMultiplayerMode && players.length === 0) {
             isMultiplayerMode = false;
+            if (pendingRejoinOnly) { pendingRejoinOnly = false; clearRejoinSession(); }
             if (peer) { peer.destroy(); peer = null; }
             notify("Couldn't reach the host - the connection timed out. Check the code, make sure the host is still hosting, and try again. If this keeps happening, it may be your network (e.g. some mobile/cellular or public Wi-Fi networks block this kind of connection).", "Connection Timed Out", "warning");
         }
@@ -1617,7 +1700,7 @@ function setupGuestConnection(connection, isReconnectAttempt) {
 
 function sendHelloUntilAcked(connection, attemptsLeft) {
     if (joinHandshakeConfirmed || !connection || !connection.open || !isMultiplayerMode || isHost) return;
-    connection.send({ type: 'HELLO', rejoinToken: myRejoinToken, rejoinPlayerId: myPlayerId });
+    connection.send({ type: 'HELLO', rejoinToken: myRejoinToken, rejoinPlayerId: myPlayerId, rejoinOnly: pendingRejoinOnly, claimPlayerId: pendingClaimPlayerId });
     if (attemptsLeft > 0) {
         setTimeout(() => sendHelloUntilAcked(connection, attemptsLeft - 1), 2000);
     } else {
@@ -1693,17 +1776,50 @@ function handleIncomingData(data, sourceConnection) {
         joinHandshakeConfirmed = true;
         myPlayerId = data.playerId;
         if (data.token) myRejoinToken = data.token;
+        pendingRejoinOnly = false;
+        pendingClaimPlayerId = null;
+        if (!isHost) saveRejoinSession();
         if (conn && conn.open) {
             conn.send({ type: 'UPDATE_PLAYER_NAME', name: localPlayerName });
         }
     } else if (data.type === 'ROOM_FULL') {
         joinHandshakeConfirmed = true;
-        notify("That room is already full.", "Room Full", "warning");
-        if (peer) { peer.destroy(); peer = null; }
-        isMultiplayerMode = false;
-        document.getElementById('game-container').style.display = 'none';
-        document.getElementById('lobby-menu').style.display = 'none';
-        document.getElementById('main-menu').style.display = 'flex';
+        const openSeats = Array.isArray(data.openSeats) ? data.openSeats : [];
+        if (openSeats.length > 0) {
+            // The room is full, but some seats belong to players who dropped.
+            // Let this person take one over (keeps that seat's cards/tokens).
+            if (choosingSeat) return;
+            choosingSeat = true;
+            showModal({
+                title: "Take Over a Seat?",
+                message: "All seats are taken, but some players are disconnected. If one of them is you, pick your seat to rejoin:",
+                type: "choice",
+                options: [...openSeats.map(s => s.name), "Cancel"]
+            }).then(idx => {
+                choosingSeat = false;
+                if (typeof idx === 'number' && openSeats[idx] && conn && conn.open) {
+                    localPlayerName = openSeats[idx].name;
+                    pendingClaimPlayerId = openSeats[idx].playerId;
+                    joinHandshakeConfirmed = false;
+                    sendHelloUntilAcked(conn, 3);
+                } else {
+                    abandonGuestJoin();
+                }
+            });
+        } else {
+            notify("That room is already full. If you were playing and got disconnected, wait about 30 seconds and try joining again.", "Room Full", "warning");
+            abandonGuestJoin();
+        }
+    } else if (data.type === 'REJOIN_FAILED') {
+        joinHandshakeConfirmed = true;
+        clearRejoinSession();
+        notify("Couldn't automatically rejoin your old seat. You can still use Join Multiplayer with the room code - if the game is full you'll be offered any disconnected seats.", "Couldn't Rejoin", "warning");
+        abandonGuestJoin();
+    } else if (data.type === 'HELLO' && isHost) {
+        // Second+ HELLO on a connection (e.g. a guest answering "Room Full" by claiming a
+        // seat). Ignore repeats from connections that already hold a seat.
+        if (hostConns.some(c => c.connection === sourceConnection)) return;
+        handleGuestHello(sourceConnection, data, numPlayers);
     } else if (data.type === 'CHAT_MESSAGE') {
         appendChatMessage(data.sender, data.message);
         if (isHost) {
@@ -1721,6 +1837,17 @@ function handleIncomingData(data, sourceConnection) {
             }
         }
     }
+}
+
+function abandonGuestJoin() {
+    pendingRejoinOnly = false;
+    pendingClaimPlayerId = null;
+    isMultiplayerMode = false;
+    if (peer) { peer.destroy(); peer = null; }
+    conn = null;
+    document.getElementById('game-container').style.display = 'none';
+    document.getElementById('lobby-menu').style.display = 'none';
+    document.getElementById('main-menu').style.display = 'flex';
 }
 
 function hostBroadcastToAll(data, excludeConnection) {
@@ -1803,6 +1930,9 @@ async function returnToMainMenu() {
     myRejoinToken = null;
     hostPeerIdForRejoin = null;
     reconnectNoticeShown = false;
+    pendingRejoinOnly = false;
+    pendingClaimPlayerId = null;
+    clearRejoinSession();
 
     if (peer) {
         peer.destroy();
@@ -1953,3 +2083,21 @@ function quitGame() {
         </div>
     `;
 }
+
+// --- REJOIN AFTER REFRESH ---
+async function offerRejoinOnLoad() {
+    const s = loadRejoinSession();
+    if (!s) return;
+    const yes = await showModal({
+        title: "Rejoin Game?",
+        message: `You were in a multiplayer game (room ${s.code}) as ${s.name}. Rejoin it?`,
+        type: "confirm", variant: "info", confirmText: "Rejoin", denyText: "No Thanks"
+    });
+    if (!yes) { clearRejoinSession(); return; }
+    localPlayerName = s.name;
+    myPlayerId = s.playerId;
+    myRejoinToken = s.token;
+    pendingRejoinOnly = true;
+    startGuestJoin(s.code);
+}
+document.addEventListener('DOMContentLoaded', offerRejoinOnLoad);
