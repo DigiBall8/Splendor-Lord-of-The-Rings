@@ -1451,6 +1451,8 @@ function attemptHostPeer(count, attemptsLeft = 5) {
         let handled = false;
 
         connection.on('data', (data) => {
+            const seated = hostConns.find(c => c.connection === connection);
+            if (seated) seated.lastSeen = Date.now();
             if (!handled) {
                 handled = true;
                 if (data && data.type === 'HELLO') {
@@ -1500,23 +1502,39 @@ function assignNewGuest(connection, count) {
 
     const assignedId = nextAssignablePlayerId++;
     const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    hostConns.push({ connection, playerId: assignedId, token });
+    hostConns.push({ connection, playerId: assignedId, token, lastSeen: Date.now() });
 
     connection.send({ type: 'ASSIGN_PLAYER', playerId: assignedId, token });
     broadcastState();
 }
 
 // Seats whose guest has dropped (no live connection) and can be taken over.
+function isSeatAvailable(c) {
+    if (!c.connection || !c.connection.open) return true;
+    // Looks connected, but a closed browser/tab can take a while to register. If it
+    // didn't answer the liveness ping sent when someone hit "room full", it's gone.
+    return !!(c.staleAsOf && (c.lastSeen || 0) < c.staleAsOf);
+}
+
 function getOpenSeats() {
     return hostConns
-        .filter(c => !c.connection || !c.connection.open)
+        .filter(isSeatAvailable)
         .map(c => {
             const p = players.find(pl => pl.id === c.playerId);
             return { playerId: c.playerId, name: p ? p.playerName : `Player ${c.playerId}` };
         });
 }
 
-function sendRoomFull(connection) {
+async function sendRoomFull(connection) {
+    // Ping every seat that looks connected and see who answers.
+    const t0 = Date.now();
+    hostConns.forEach(c => {
+        if (c.connection && c.connection.open) {
+            c.staleAsOf = t0;
+            try { c.connection.send({ type: 'PING' }); } catch (e) {}
+        }
+    });
+    await new Promise(r => setTimeout(r, 2500));
     const openSeats = getOpenSeats();
     if (connection.open) {
         connection.send({ type: 'ROOM_FULL', openSeats });
@@ -1532,6 +1550,8 @@ function sendRoomFull(connection) {
 function seatReconnect(entry, connection) {
     const oldConnection = entry.connection;
     entry.connection = connection;
+    entry.lastSeen = Date.now();
+    entry.staleAsOf = null;
     if (oldConnection && oldConnection !== connection) {
         try { oldConnection.close(); } catch (e) {}
     }
@@ -1553,7 +1573,7 @@ function handleGuestHello(connection, data, count) {
     // 2) Seat takeover: they lost their token (e.g. cleared storage) and picked a
     //    disconnected seat from the "Room Full" list. Issue the seat a fresh token.
     if (data.claimPlayerId) {
-        const entry = hostConns.find(c => c.playerId === data.claimPlayerId && (!c.connection || !c.connection.open));
+        const entry = hostConns.find(c => c.playerId === data.claimPlayerId && isSeatAvailable(c));
         if (entry) {
             entry.token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
             seatReconnect(entry, connection);
@@ -1810,6 +1830,8 @@ function handleIncomingData(data, sourceConnection) {
             notify("That room is already full. If you were playing and got disconnected, wait about 30 seconds and try joining again.", "Room Full", "warning");
             abandonGuestJoin();
         }
+    } else if (data.type === 'PING' && !isHost) {
+        if (sourceConnection && sourceConnection.open) sourceConnection.send({ type: 'PONG' });
     } else if (data.type === 'REJOIN_FAILED') {
         joinHandshakeConfirmed = true;
         clearRejoinSession();
