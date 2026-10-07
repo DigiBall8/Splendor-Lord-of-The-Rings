@@ -1333,7 +1333,10 @@ function renderLobby() {
         listEl.innerHTML = players.map((p, idx) => {
             const joined = joinedFlags[idx];
             const label = idx === 0 ? `${escapeHtml(p.playerName)} (Host)` : escapeHtml(p.playerName);
-            return `<div class="lobby-player-row">${joined ? '✅' : '⏳'} ${label}</div>`;
+            const entry = hostConns.find(c => c.playerId === p.id);
+            const kickBtn = (isHost && idx > 0 && joined && entry && !entry.vacated)
+                ? ` <button type="button" onclick="hostKickPlayer(${p.id})" style="padding: 1px 8px; font-size: 11px; background-color: #c0392b;">Kick</button>` : '';
+            return `<div class="lobby-player-row">${joined ? '✅' : '⏳'} ${label}${kickBtn}</div>`;
         }).join('');
     }
 
@@ -1495,6 +1498,19 @@ function attemptHostPeer(count, attemptsLeft = 5) {
 // Grants a connection a brand new player seat (the normal "someone just
 // joined" path).
 function assignNewGuest(connection, count) {
+    // A kicked seat keeps its cards/tokens/points - the next person to join takes it over.
+    const vacatedSeats = hostConns.filter(c => c.vacated);
+    if (vacatedSeats.length === 1) {
+        const entry = vacatedSeats[0];
+        entry.token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        seatReconnect(entry, connection);
+        return;
+    }
+    if (vacatedSeats.length > 1) {
+        // Several kicked seats: let the joiner choose which one they're taking.
+        connection.send({ type: 'ROOM_FULL', openSeats: getOpenSeats().filter(s => vacatedSeats.some(v => v.playerId === s.playerId)) });
+        return;
+    }
     if (nextAssignablePlayerId > count) {
         sendRoomFull(connection);
         return;
@@ -1508,8 +1524,59 @@ function assignNewGuest(connection, count) {
     broadcastState();
 }
 
+async function hostKickPlayer(playerId) {
+    if (!isHost) return;
+    const entry = hostConns.find(c => c.playerId === playerId);
+    const p = players.find(pl => pl.id === playerId);
+    if (!entry || entry.vacated) return;
+    const ok = await showModal({
+        title: "Kick Player?",
+        message: `Remove ${p ? p.playerName : 'this player'} from their seat? Their cards, tokens and points stay with the seat, and the next person to join with the room code takes it over.`,
+        type: "confirm", variant: "warning", confirmText: "Kick", denyText: "Cancel"
+    });
+    if (!ok) return;
+    const old = entry.connection;
+    entry.connection = null;
+    entry.token = null;   // the old tab's saved token no longer works
+    entry.vacated = true;
+    if (old) {
+        try { if (old.open) old.send({ type: 'KICKED' }); } catch (e) {}
+        setTimeout(() => { try { old.close(); } catch (e) {} }, 400);
+    }
+    if (p && !gameState.gameStarted) p.playerName = `Player ${playerId}`; // lobby: show the seat as empty again
+    renderKickList();
+    broadcastState();
+    updateUI();
+}
+
+function renderKickList() {
+    const box = document.querySelector('#pause-menu .menu-box');
+    if (!box) return;
+    let wrap = document.getElementById('pause-kick-list');
+    if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'pause-kick-list';
+        wrap.style.cssText = 'margin: 8px 0; text-align: left; font-size: 13px; color: #e3d3b8;';
+        box.insertBefore(wrap, box.querySelector('.menu-buttons'));
+    }
+    if (!isHost || !isMultiplayerMode || hostConns.length === 0) {
+        wrap.style.display = 'none';
+        return;
+    }
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<div style="margin-bottom: 4px;">Players:</div>' + hostConns.map(entry => {
+        const p = players.find(pl => pl.id === entry.playerId);
+        const name = escapeHtml(p ? p.playerName : `Player ${entry.playerId}`);
+        const connected = entry.connection && entry.connection.open;
+        const status = entry.vacated ? '⚪ Seat open' : (connected ? '🟢 Connected' : '🔴 Disconnected');
+        const btn = entry.vacated ? '' : `<button type="button" onclick="hostKickPlayer(${entry.playerId})" style="padding: 2px 10px; font-size: 12px; background-color: #c0392b;">Kick</button>`;
+        return `<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 3px 0;"><span>${name} - ${status}</span>${btn}</div>`;
+    }).join('');
+}
+
 // Seats whose guest has dropped (no live connection) and can be taken over.
 function isSeatAvailable(c) {
+    if (c.vacated) return true; // host kicked this player - anyone may take the seat
     if (!c.connection || !c.connection.open) return true;
     // Looks connected, but a closed browser/tab can take a while to register. If it
     // didn't answer the liveness ping sent when someone hit "room full", it's gone.
@@ -1552,6 +1619,7 @@ function seatReconnect(entry, connection) {
     entry.connection = connection;
     entry.lastSeen = Date.now();
     entry.staleAsOf = null;
+    entry.vacated = false;
     if (oldConnection && oldConnection !== connection) {
         try { oldConnection.close(); } catch (e) {}
     }
@@ -1830,6 +1898,12 @@ function handleIncomingData(data, sourceConnection) {
             notify("That room is already full. If you were playing and got disconnected, wait about 30 seconds and try joining again.", "Room Full", "warning");
             abandonGuestJoin();
         }
+    } else if (data.type === 'KICKED' && !isHost) {
+        clearRejoinSession();
+        const pm = document.getElementById('pause-menu');
+        if (pm) pm.style.display = 'none';
+        abandonGuestJoin();
+        notify("The host removed you from the game. You can rejoin with the room code if a seat is open.", "Removed From Game", "warning");
     } else if (data.type === 'PING' && !isHost) {
         if (sourceConnection && sourceConnection.open) sourceConnection.send({ type: 'PONG' });
     } else if (data.type === 'REJOIN_FAILED') {
@@ -1926,6 +2000,7 @@ function togglePauseMenu() {
         }
     }
 
+    if (!isVisible) renderKickList();
     pauseMenu.style.display = isVisible ? 'none' : 'flex';
 }
 
