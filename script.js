@@ -258,7 +258,23 @@ const CARD_DATABASE = {
         37: { points: 0, gem: 'diamond', leaves: true, cost: { emerald: 1, diamond: 0, sapphire: 1, ruby: 0, gold: 3 } },
         38: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 2, ruby: 0, gold: 2 } },
         39: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 1, gold: 2 } },
-        40: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 4 } }
+        40: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 0, gold: 4 } },
+        // --- NEW LEVEL 1 CARDS (41-55): edit the values below ---
+        41: { points: 0, gem: 'gold', leaves: false, cost: { emerald: 1, diamond: 0, sapphire: 1, ruby: 1, gold: 2 } },
+        42: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 2, diamond: 0, sapphire: 0, ruby: 0, gold: 1 } },
+        43: { points: 0, gem: 'emerald', leaves: false, cost: { emerald: 1, diamond: 0, sapphire: 1, ruby: 1, gold: 1 } },
+        44: { points: 0, gem: 'sapphire', leaves: false, cost: { emerald: 1, diamond: 1, sapphire: 1, ruby: 0, gold: 1 } },
+        45: { points: 0, gem: 'gold', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 2, ruby: 0, gold: 2 } },
+        46: { points: 0, gem: 'ruby', leaves: false, cost: { emerald: 0, diamond: 2, sapphire: 0, ruby: 0, gold: 1 } },
+        47: { points: 0, gem: 'ruby', leaves: false, cost: { emerald: 0, diamond: 2, sapphire: 1, ruby: 1, gold: 1 } },
+        48: { points: 0, gem: 'sapphire', leaves: false, cost: { emerald: 2, diamond: 0, sapphire: 0, ruby: 2, gold: 0 } },
+        49: { points: 0, gem: 'emerald', leaves: false, cost: { emerald: 2, diamond: 0, sapphire: 2, ruby: 0, gold: 0 } },
+        50: { points: 0, gem: 'emerald', leaves: false, cost: { emerald: 1, diamond: 1, sapphire: 0, ruby: 2, gold: 1 } },
+        51: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 1, diamond: 1, sapphire: 0, ruby: 1, gold: 1 } },
+        52: { points: 0, gem: 'diamond', leaves: false, cost: { emerald: 1, diamond: 0, sapphire: 2, ruby: 1, gold: 1 } },
+        53: { points: 0, gem: 'gold', leaves: false, cost: { emerald: 0, diamond: 1, sapphire: 1, ruby: 1, gold: 1 } },
+        54: { points: 0, gem: 'sapphire', leaves: false, cost: { emerald: 2, diamond: 1, sapphire: 1, ruby: 1, gold: 0 } },
+        55: { points: 0, gem: 'ruby', leaves: false, cost: { emerald: 1, diamond: 0, sapphire: 1, ruby: 1, gold: 1 } }
     },
     2: {
         1: { points: 2, gem: 'emerald', leaves: false, cost: { emerald: 2, diamond: 1, sapphire: 0, ruby: 4, gold: 0 } },
@@ -290,7 +306,13 @@ const CARD_DATABASE = {
         27: { points: 1, gem: 'diamond', leaves: true, cost: { emerald: 0, diamond: 0, sapphire: 3, ruby: 3, gold: 2 } },
         28: { points: 2, gem: 'ruby', leaves: false, cost: { emerald: 3, diamond: 5, sapphire: 0, ruby: 0, gold: 0 } },
         29: { points: 2, gem: 'ruby', leaves: false, cost: { emerald: 0, diamond: 5, sapphire: 0, ruby: 0, gold: 0 } },
-        30: { points: 2, gem: 'diamond', leaves: false, cost: { emerald: 1, diamond: 2, sapphire: 4, ruby: 0, gold: 0 } }
+        30: { points: 2, gem: 'diamond', leaves: false, cost: { emerald: 1, diamond: 2, sapphire: 4, ruby: 0, gold: 0 } },
+        // --- NEW LEVEL 2 CARDS (31-35): edit the values below ---
+        31: { points: 2, gem: 'ruby', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 5, ruby: 3, gold: 0 } },
+        32: { points: 2, gem: 'emerald', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 5, gold: 3 } },
+        33: { points: 3, gem: 'diamond', leaves: false, cost: { emerald: 0, diamond: 5, sapphire: 0, ruby: 3, gold: 0 } },
+        34: { points: 2, gem: 'sapphire', leaves: false, cost: { emerald: 3, diamond: 5, sapphire: 0, ruby: 0, gold: 0 } },
+        35: { points: 2, gem: 'gold', leaves: false, cost: { emerald: 5, diamond: 0, sapphire: 0, ruby: 3, gold: 0 } }
     },
     3: {
         1: { points: 5, gem: 'sapphire', leaves: false, cost: { emerald: 0, diamond: 0, sapphire: 0, ruby: 7, gold: 3 } },
@@ -335,7 +357,7 @@ function getCardByTierAndNumber(tier, randNum) {
 
 function createDeck(tier) {
     let deck = [];
-    let maxCards = tier === 1 ? 40 : (tier === 2 ? 30 : 20);
+    let maxCards = tier === 1 ? 55 : (tier === 2 ? 35 : 20);
     for (let i = 1; i <= maxCards; i++) {
         deck.push(getCardByTierAndNumber(tier, i));
     }
@@ -392,7 +414,7 @@ gameState.marketTier3 = [gameState.decks[3].pop(), gameState.decks[3].pop(), gam
 // (or a multiplayer guest joining later) resolves instantly.
 function buildAllGameArtUrls() {
     const urls = [];
-    const tierCounts = { 1: 40, 2: 30, 3: 20 };
+    const tierCounts = { 1: 55, 2: 35, 3: 20 };
     for (const tier of [1, 2, 3]) {
         for (let n = 1; n <= tierCounts[tier]; n++) urls.push(`Level ${tier} Cards/${n}.jpg`);
         urls.push(`Card UI/level ${tier} draw.jpg`);
@@ -403,6 +425,11 @@ function buildAllGameArtUrls() {
     return urls;
 }
 
+// Cache art on the player's device (see sw.js) so repeat visits load instantly.
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* caching just won't be available */ });
+}
+const preloadedArtRefs = [];
 let assetsLoadedCount = 0;
 let assetsTotalCount = 0;
 const assetProgressListeners = [];
@@ -422,15 +449,26 @@ const allGameArtReady = new Promise((resolve) => {
     let remaining = assetsTotalCount;
     urls.forEach(url => {
         const img = new Image();
+        img.decoding = 'async';
+        let settled = false;
         const settle = () => {
+            if (settled) return;
+            settled = true;
             assetsLoadedCount++;
             reportAssetProgress();
             remaining--;
             if (remaining <= 0) resolve();
         };
-        img.onload = settle;
+        // Wait for the image to be fully DECODED, not just downloaded, so
+        // it paints instantly the first time a card appears on screen.
+        img.onload = () => {
+            if (img.decode) img.decode().then(settle, settle);
+            else settle();
+        };
         img.onerror = settle;
         img.src = url;
+        // Keep a reference so the browser doesn't discard the decoded image.
+        preloadedArtRefs.push(img);
     });
 });
 
